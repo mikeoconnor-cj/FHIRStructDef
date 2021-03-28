@@ -1,0 +1,56 @@
+{
+    "resourceType": "Patient",
+    "extension": [
+        {
+            "url": "https://bluebutton.cms.gov/resources/variables/race",
+            "valueCoding": {
+                "system": "https://bluebutton.cms.gov/resources/variables/race",
+                "code": "1",
+                "display": "White"
+            }
+        }
+    ],
+    "name": [
+        {
+            "use": "official",
+            "given": ["Michael"],
+            "family": "O'Connor"
+
+        }
+    ],
+    "gender": "male",
+    "birthDate": "1962-11-08",
+    "telecom": [
+        {
+            "value": "3011233341",
+            "use": "mobile",
+            "system": "phone"
+        },
+        {
+            "system": "email",
+            "value": "maaanoc@yackyack.com"
+        }
+    ],
+    "address": [
+        {
+            "line": [
+                "1612 Ballson Drive"
+            ],
+            "city": "Asscrapolis",
+            "state": "MD",
+            "postalCode": "21401"
+        }
+    ],
+    "generalPractitioner": [
+        {
+            "reference": "a reference to the Pracitioner resource"
+        }
+    ],
+    "communication": [
+        {
+            "language": {
+                "text": "english"
+            }
+        }
+    ]
+}

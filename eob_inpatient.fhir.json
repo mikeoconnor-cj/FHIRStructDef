@@ -1,0 +1,146 @@
+{
+    "resourceType": "ExplanationOfBenefit",
+    "id": "inpatient--4436342082",   
+    "identifier": [
+        {
+            "system": "https://bluebutton.cms.gov/resources/variables/clm_id",
+            "value": "-4436342082"
+        },
+        {
+            "system": "https://bluebutton.cms.gov/resources/identifier/claim-group",
+            "value": "52241843218"
+        }
+    ],
+    "status": "active",
+    "type": {
+        "coding": [
+            {
+                "system": "https://bluebutton.cms.gov/resources/variables/nch_clm_type_cd",
+                "code": "60",
+                "display": "inpatient claim"
+            },
+            {
+                "system": "https://bluebutton.cms.gov/resources/codesystem/eob-type",
+                "code": "INPATIENT"
+            },
+            {
+                "system": "http://hl7.org/fhir/ex-claimtype",
+                "code": "institutional",
+                "display": "institutional"
+            },
+            {
+                "system": "https://bluebutton.cms.gov/resources/variables/nch_near_line_rec_ident_cd",
+                "code": "V",
+                "display": "Part A institutional claim record (inpatient [IP], skilled nursing facility [SNF], hospice [HOS], or home health agency [HHA])"
+            },
+            {
+                "system": "https://bluebutton.cms.gov/resources/variables/clm_srvc_clsfctn_type_cd",
+                "code": "1"
+            }
+        ]
+    },
+    "patient": {
+        "reference": "Patient/-20140000008325"
+    },
+    "billablePeriod": {
+        "extension": [
+            {
+                "url": "https://bluebutton.cms.gov/resources/variables/claim_query_cd",
+                "valueCoding": {
+                    "system": "https://bluebutton.cms.gov/resources/variables/claim_query_cd",
+                    "code": "3",
+                    "display": "Final bill"
+                }
+            }
+        ],
+        "start": "2015-04-01",
+        "end": "2015-04-01"
+    },
+    "provider": {
+        "identifier": {
+            "system": "https://bluebutton.cms.gov/resources/variables/prvdr_num",
+            "value": "999999"
+        }
+    },
+    "insurance": [
+        {
+            "coverage": {
+                "reference": "Coverage/part-a--20140000008325"
+            }
+        }
+    ], 
+    "facility": {
+        "extension": [
+            {
+                "url": "https://bluebutton.cms.gov/resources/variables/clm_fac_type_cd",
+                "valueCoding": {
+                    "system": "https://bluebutton.cms.gov/resources/variables/clm_fac_type_cd",
+                    "code": "1",
+                    "display": "Hospital"
+                }
+            }
+        ],
+        "identifier": {
+            "system": "http://hl7.org/fhir/sid/us-npi",
+            "value": "9999999999"
+        }
+    },
+    "careTeam": [
+        {
+            "sequence": 2,
+            "provider": {
+                "identifier": {
+                    "system": "http://hl7.org/fhir/sid/us-npi",
+                    "value": "9999999999"
+                }
+            },
+            "role": {
+                "coding": [
+                    {
+                        "system": "http://hl7.org/fhir/claimcareteamrole",
+                        "code": "assist",
+                        "display": "Assisting Provider"
+                    }
+                ]
+            }       
+        },
+        {
+            "sequence": 3,
+            "provider": {
+                "identifier": {
+                    "system": "http://hl7.org/fhir/sid/us-npi",
+                    "value": "9999999999"
+                }
+            },
+            "role": {
+                "coding": [
+                    {
+                        "system": "http://hl7.org/fhir/claimcareteamrole",
+                        "code": "other",
+                        "display": "Other"
+                    }
+                ]
+            }
+        },
+        {
+            "sequence": 4,
+            "provider": {
+                "identifier": {
+                    "system": "http://hl7.org/fhir/sid/us-npi",
+                    "value": "9999999999"
+                }
+            },
+            "role": {
+                "coding": [
+                    {
+                        "system": "http://hl7.org/fhir/claimcareteamrole",
+                        "code": "primary",
+                        "display": "Primary provider"
+                    }
+                ]
+            }
+        }
+        
+    ]
+
+}
