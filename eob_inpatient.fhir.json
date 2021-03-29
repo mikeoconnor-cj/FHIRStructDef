@@ -141,6 +141,184 @@
             }
         }
         
+    ],
+    "diagnosis": [
+        {
+            "packageCode": {
+                "coding": [
+                    {
+                        "system": "https://bluebutton.cms.gov/resources/variables/clm_drg_cd",
+                        "code": "191"
+                    }
+                ]
+            }
+        },
+        {
+            "sequence": 2,
+            "diagnosisCodeableConcept": {
+                "coding": [
+                    {
+                        "system": "http://hl7.org/fhir/sid/icd-9-cm",
+                        "code": "49392",
+                        "display": "ASTHMA NOS W (AC) EXAC"
+                    }
+                ]
+            },
+            "type": [
+                {
+                    "coding": [
+                        {
+                            "system": "https://bluebutton.cms.gov/resources/codesystem/diagnosis-type",
+                            "code": "admitting",
+                            "display": "The diagnosis given as the reason why the patient was admitted to the hospital."
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "extension": [
+                {
+                    "url": "https://bluebutton.cms.gov/resources/variables/clm_poa_ind_sw1",
+                    "valueCoding": {
+                        "system": "https://bluebutton.cms.gov/resources/variables/clm_poa_ind_sw1",
+                        "code": "Y",
+                        "display": "Diagnosis was present at the time of admission (POA)"
+                    }
+                }
+            ],
+            "sequence": 3,
+            "diagnosisCodeableConcept": {
+                "coding": [
+                    {
+                        "system": "http://hl7.org/fhir/sid/icd-9-cm",
+                        "code": "4940",
+                        "display": "BRONCHIECTAS W/O AC EXAC"
+                    }
+                ]
+            },
+            "type": [
+                {
+                    "coding": [
+                        {
+                            "system": "https://bluebutton.cms.gov/resources/codesystem/diagnosis-type",
+                            "code": "principal",
+                            "display": "The single medical diagnosis that is most relevant to the patient's chief complaint or need for treatment"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "extension": [
+                {
+                    "url": "https://bluebutton.cms.gov/resources/variables/clm_poa_ind_sw1",
+                    "valueCoding": {
+                        "system": "https://bluebutton.cms.gov/resources/variables/clm_poa_ind_sw1",
+                        "code": "Y",
+                        "display": "Diagnosis was present at the time of admission (POA)"
+                    }
+                }
+            ],
+            "sequence": 4,
+            "diagnosisCodeableConcept": {
+                "coding": [
+                    {
+                        "system": "http://hl7.org/fhir/sid/icd-9-cm",
+                        "code": "49322",
+                        "display": "CH OBST ASTH W (AC) EXAC"
+                    }
+                ]
+            }
+        },
+        {
+            "extension": [
+                {
+                    "url": "https://bluebutton.cms.gov/resources/variables/clm_poa_ind_sw1",
+                    "valueCoding": {
+                        "system": "https://bluebutton.cms.gov/resources/variables/clm_poa_ind_sw1",
+                        "code": "Y",
+                        "display": "Diagnosis was present at the time of admission (POA)"
+                    }
+                }
+            ],
+            "sequence": 5,
+            "diagnosisCodeableConcept": {
+                "coding": [
+                    {
+                        "system": "http://hl7.org/fhir/sid/icd-9-cm",
+                        "code": "4619",
+                        "display": "ACUTE SINUSITIS NOS"
+                    }
+                ]
+            }
+        },
+        {
+            "extension": [
+                {
+                    "url": "https://bluebutton.cms.gov/resources/variables/clm_poa_ind_sw1",
+                    "valueCoding": {
+                        "system": "https://bluebutton.cms.gov/resources/variables/clm_poa_ind_sw1",
+                        "code": "Y",
+                        "display": "Diagnosis was present at the time of admission (POA)"
+                    }
+                }
+            ],
+            "sequence": 6,
+            "diagnosisCodeableConcept": {
+                "coding": [
+                    {
+                        "system": "http://hl7.org/fhir/sid/icd-9-cm",
+                        "code": "9902",
+                        "display": "HYPOXEMIA"
+                    }
+                ]
+            }
+        },
+        {
+            "extension": [
+                {
+                    "url": "https://bluebutton.cms.gov/resources/variables/clm_poa_ind_sw1",
+                    "valueCoding": {
+                        "system": "https://bluebutton.cms.gov/resources/variables/clm_poa_ind_sw1",
+                        "code": "Y",
+                        "display": "Diagnosis was present at the time of admission (POA)"
+                    }
+                }
+            ],
+            "sequence": 7,
+            "diagnosisCodeableConcept": {
+                "coding": [
+                    {
+                        "system": "http://hl7.org/fhir/sid/icd-9-cm",
+                        "code": "2449",
+                        "display": "HYPOTHYROIDISM NOS"
+                    }
+                ]
+            }
+        },
+        {
+            "extension": [
+                {
+                    "url": "https://bluebutton.cms.gov/resources/variables/clm_poa_ind_sw1",
+                    "valueCoding": {
+                        "system": "https://bluebutton.cms.gov/resources/variables/clm_poa_ind_sw1",
+                        "code": "Y",
+                        "display": "Diagnosis was present at the time of admission (POA)"
+                    }
+                }
+            ],
+            "sequence": 8,
+            "diagnosisCodeableConcept": {
+                "coding": [
+                    {
+                        "system": "http://hl7.org/fhir/sid/icd-9-cm",
+                        "code": "4019",
+                        "display": "HYPERTENSION NOS"
+                    }
+                ]
+            }
+        }
     ]
 
 }
