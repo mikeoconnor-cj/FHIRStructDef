@@ -768,3 +768,23 @@ AND src_role <> 'primary'  --only 2 claims with src_sequence 2 and 3 the excepti
 
 --https://community.snowflake.com/s/question/0D50Z00008izVcQSAU/filter-array-elements
 --https://docs.snowflake.com/en/sql-reference/functions/array_to_string.html
+
+--array agg sorting w/in groups identifying role vs. ID type or activity_type_cd
+select fk_eob_id
+	, array_agg(src_role || '|' || src_provider_npi) within group(order by src_sequence) as fk_provider_list
+FROM ods.BB_EOB_CARE_TEAM 
+WHERE record_status_cd = 'a'
+
+--filtering with array_contains and array_construct
+
+select fk_eob_id
+	, array_agg(src_role || '|' || src_provider_npi) within group(order by src_sequence) as fk_provider_list
+FROM ods.BB_EOB_CARE_TEAM 
+WHERE record_status_cd = 'a'
+	and array_contains(src_role, array_construct('primary', 'supervisor')) = TRUE
+
+select fk_eob_id
+	, array_agg(src_role || '|' || src_provider_npi) within group(order by src_sequence) as fk_provider_list
+FROM ods.BB_EOB_CARE_TEAM 
+WHERE record_status_cd = 'a'
+	and array_contains(src_role, array_construct('assist','other','supervisor')) = FALSE
