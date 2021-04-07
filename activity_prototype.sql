@@ -2,14 +2,74 @@ USE WAREHOUSE dev_humana;
 USE DATABASE dev_humana;
 
 
-SELECT * FROM ods.BB_EOB_PROCEDURE --no data
-SELECT * FROM ods.BB_PATIENT
-SELECT * FROM ods.BB_PATIENT_LINK 
-SELECT * FROM ods.BB_PATIENT_IDENTIFIER 
-SELECT * FROM ods.BB_PATIENT_EXTENSION 
-SELECT * FROM ods.BB_COVERAGE 
-
 --fac_rev filtering
+--768,631
+
+WITH allProvdrData
+AS 
+(
+SELECT fk_eob_id
+	, src_responsible
+	, src_role
+	, CASE 
+		WHEN src_role = 'primary' THEN 1
+		WHEN src_role = 'supervisor' THEN 2
+		WHEN src_role = 'assist' THEN 3
+		WHEN src_role = 'other' THEN 4
+		ELSE 5
+	  END role_value
+	, src_qualification
+	, src_sequence
+	, src_provider_npi
+	, ROW_NUMBER() OVER (PARTITION BY fk_eob_id ORDER BY src_sequence) AS rwNbr
+FROM ods.BB_EOB_CARE_TEAM
+WHERE record_status_cd = 'a'
+ORDER BY fk_eob_id
+	, src_sequence
+)
+--array agg sorting w/in groups identifying role vs. ID type (NPI) or activity_type_cd
+, allPrvdrRoleLabel
+AS 
+(
+select fk_eob_id
+	, array_agg(src_role || '|' || src_provider_npi) within group(order by src_sequence) as providerID
+	, array_agg(src_role) within group(order by src_sequence) as providerRole
+	, array_agg(src_qualification) within group(order by src_sequence) as providerSpclty
+FROM allProvdrData
+GROUP BY fk_eob_id
+)
+, allPrvdrNPILabel
+AS 
+(
+select fk_eob_id
+	, array_agg('npi_num' || '|' || src_provider_npi) within group(order by src_sequence) as providerID
+	, array_agg(src_role) within group(order by src_sequence) as providerRole
+	, array_agg(src_qualification) within group(order by src_sequence) as providerSpclty	
+FROM allProvdrData
+GROUP BY fk_eob_id
+)
+, primaryOnlyPrvdrNPILabel
+AS
+(
+select fk_eob_id
+	, array_agg('npi_num' || '|' || src_provider_npi) within group(order by src_sequence) as providerID
+	, array_agg(src_role) within group(order by src_sequence) as providerRole
+	, array_agg(src_qualification) within group(order by src_sequence) as providerSpclty		
+FROM allProvdrData
+WHERE array_contains(src_role::variant, array_construct('primary')) = TRUE   
+GROUP BY fk_eob_id
+)
+, allOtherPrvdrNPILabel
+AS
+(
+select fk_eob_id
+	, array_agg('npi_num' || '|' || src_provider_npi) within group(order by src_sequence) as providerID
+	, array_agg(src_role) within group(order by src_sequence) as providerRole
+	, array_agg(src_qualification) within group(order by src_sequence) as providerSpclty			
+FROM allProvdrData
+WHERE array_contains(src_role::variant, array_construct('supervisor','assist','other')) = TRUE   
+GROUP BY fk_eob_id
+)
 
 SELECT 'fac_rev' AS activity_type_cd
 	, 'fac_rev'||'|'|| bb_eob_item.pk_eob_item_id AS pk_activity_id
@@ -100,8 +160,29 @@ SELECT 'fac_rev' AS activity_type_cd
 	, bb_eob_item.src_revenue AS facility_revenue_center_cd
     , '#NA' AS fk_tin_id
     , '#NA' AS fk_tin_rendering_id	
-	
-	
+	, allPrvdrNPILabel.providerID AS fk_provider_id_list
+	, coalesce(trim(primaryOnlyPrvdrNPILabel.providerID[0]), 'npiNum|#NA') AS fk_provider_primary_id 
+	--, 'npi_num'||'|'||COALESCE(h.src_oprtg_prvdr_npi_num,'#NA') AS fk_provider_operating_id
+	, '#NA' AS fk_provider_operating_id	
+	--, 'npi_num'||'|'||COALESCE(h.src_atndg_prvdr_npi_num,'#NA') AS fk_provider_attending_id
+	, '#NA'	AS fk_provider_attending_id
+	--npi_num'||'|'||COALESCE(h.src_othr_prvdr_npi_num,'#NA') AS fk_provider_other_id
+	, coalesce(trim(allOtherPrvdrNPILabel.providerID[0]), 'npiNum|#NA') AS fk_provider_other_id 
+	, '#NA' AS fk_provider_rendering_id
+    , '#NA' AS provider_rendering_specialty_cd
+    , '#NA' AS provider_rendering_type_cd
+    , '#NA' AS fk_provider_pay_to_id
+    , '#NA' AS fk_provider_ordering_id
+    , '#NA' AS fk_provider_dispensing_id
+    , '#NA' AS provider_dispensing_id_type_cd
+    , '#NA' AS fk_provider_prescribing_id
+    , '#NA' AS provider_prescribing_id_type_cd	
+	, TO_ARRAY('#NA') AS fk_diagnosis_id_list
+	, TO_ARRAY('#NA') AS diagnosis_provider_detail_icd_9_cd_list
+	, TO_ARRAY('#NA') AS diagnosis_provider_detail_icd_10_cd_list	
+	, 'hcpcs_cd'||'|'||COALESCE(bb_eob_item.src_service,'#NA') AS fk_procedure_id
+	, COALESCE(xref.target_1_value, '#NA') AS procedure_betos_cd
+	, COALESCE(bb_eob_item.src_service,'#NA') AS procedure_hcpcs_cd
 	
 	, bb_eob.eff_start_dt
 	, bb_eob.eff_end_dt
@@ -119,6 +200,15 @@ SELECT 'fac_rev' AS activity_type_cd
 FROM DEV_HUMANA.ods.bb_eob
 JOIN dev_humana.ods.bb_eob_item
 	ON bb_eob.pk_eob_id = bb_eob_item.fk_eob_id
+LEFT JOIN allPrvdrNPILabel
+	ON bb_eob.pk_eob_id = allPrvdrNPILabel.fk_eob_id
+LEFT JOIN primaryOnlyPrvdrNPILabel
+	ON bb_eob.pk_eob_id = primaryOnlyPrvdrNPILabel.fk_eob_id
+LEFT JOIN allOtherPrvdrNPILabel
+	ON bb_eob.pk_eob_id = allOtherPrvdrNPILabel.fk_eob_id
+LEFT JOIN dev_common.ref.code_xref_map xref
+    ON bb_eob_item.src_service = xref.source_1_value
+        AND xref.xref_id = 'hcpcs_x_betos'	
 WHERE bb_eob.RECORD_STATUS_CD = 'a'
 	AND bb_eob_item.record_status_cd = 'a'
 	--AND load_period = 'm-2021-03'
@@ -131,180 +221,13 @@ WHERE bb_eob.RECORD_STATUS_CD = 'a'
 							,'60' --Inpatient
 							,'61' --Inpatient
 							) 
-	AND bb_eob_item.src_revenue IS NOT NULL
-	
-	--none of these. are they all icd9? they look like cpt's five digit
-	AND bb_eob_item.src_service IS NOT NULL
-	AND bb_eob_item.src_service IN ('30233N1', '02HV33Z', '5A09357') --took theese from mdpcp
-
-	
-SELECT min(src_serviced_date) minssd
-	, max(src_serviced_date) masssd
-	, min(src_serviced_period_start)	 minsps
-	, max(src_serviced_period_start)  maxsps
-	, min(src_serviced_period_end)	 minspe
-	, max(src_serviced_period_end)  maxspe	
-	, min(src_billable_period_start) minbps
-	, max(src_billable_period_start) maxbps
-	, min(src_billable_period_end)	minbpe
-	, max(src_billable_period_end) maxbps
-	, count(*) AS rwCnt
-FROM DEV_HUMANA.ods.bb_eob
-JOIN dev_humana.ods.bb_eob_item
-	ON bb_eob.pk_eob_id = bb_eob_item.fk_eob_id
-WHERE bb_eob.RECORD_STATUS_CD = 'a'
-	AND bb_eob_item.record_status_cd = 'a'
-	--AND load_period = 'm-2021-03'
-	AND SUBSTRING(bb_eob.LOAD_PERIOD, 3,7) = '2021-03'
-	AND bb_eob.src_type IN (
-							'10'  --HHA     --no dates
-							, '20' --SNF
-							, '30' --SNF
-							,'40' --Outpatient
-							,'50' --Hospice
-							,'60' --Inpatient
-							,'61' --Inpatient
-							
-							,'PDE'   -- part d events   --no dates							
-							
-													
---							'71'   --sps, spe
-
---							'72'	--sps, spe
---							,'81'
---							,'82'
-							
-				
-							) 	
-	
---there are length 7 and there are no such codes in BB samplees	
-	
-SELECT max(len(bb_eob_item.src_service )) maxLen --11
-	, min(len(bb_eob_item.src_service )) minLen --1
-FROM dev_humana.ods.bb_eob_item
-WHERE bb_eob_item.record_status_cd = 'a'
-
-SELECT *
-FROM dev_humana.ods.bb_eob_item
-WHERE bb_eob_item.record_status_cd = 'a'
-AND len(bb_eob_item.src_service ) = 5
-
-SELECT *
-FROM dev_humana.ods.bb_eob_item
-WHERE bb_eob_item.record_status_cd = 'a'
-AND len(bb_eob_item.src_service ) = 11
-
-SELECT bb_eob.src_type  --these are all PDE, so maybe these are NDC codes
-	, count(*) AS rwCnt
-FROM DEV_HUMANA.ods.bb_eob
-JOIN dev_humana.ods.bb_eob_item
-	ON bb_eob.pk_eob_id = bb_eob_item.fk_eob_id
-WHERE bb_eob.RECORD_STATUS_CD = 'a'
-	AND bb_eob_item.record_status_cd = 'a'
-	--AND load_period = 'm-2021-03'
-	AND SUBSTRING(bb_eob.LOAD_PERIOD, 3,7) = '2021-03'
-	AND len(bb_eob_item.src_service ) = 11
-GROUP BY src_type
-
-SELECT bb_eob.src_type  --these are all PDE
-	, count(*) AS rwCnt
-FROM DEV_GEISINGER.ods.bb_eob
-JOIN DEV_GEISINGER.ods.bb_eob_item
-	ON bb_eob.pk_eob_id = bb_eob_item.fk_eob_id
-WHERE bb_eob.RECORD_STATUS_CD = 'a'
-	AND bb_eob_item.record_status_cd = 'a'
-	--AND load_period = 'm-2021-03'
-	AND SUBSTRING(bb_eob.LOAD_PERIOD, 3,7) = '2021-03'
-	AND len(bb_eob_item.src_service ) = 11
-GROUP BY src_type
 
 
-
-SELECT bb_eob.src_type  --31 outpatient, 2 carrier
-	, count(*) AS rwCnt
-FROM DEV_HUMANA.ods.bb_eob
-JOIN dev_humana.ods.bb_eob_item
-	ON bb_eob.pk_eob_id = bb_eob_item.fk_eob_id
-WHERE bb_eob.RECORD_STATUS_CD = 'a'
-	AND bb_eob_item.record_status_cd = 'a'
-	--AND load_period = 'm-2021-03'
-	AND SUBSTRING(bb_eob.LOAD_PERIOD, 3,7) = '2021-03'
-	AND len(bb_eob_item.src_service ) BETWEEN 3 AND 4
-GROUP BY src_type
-
-SELECT bb_eob.src_type
-	, bb_eob_item.src_service
-	, bb_eob.pk_eob_id
-FROM DEV_HUMANA.ods.bb_eob
-JOIN dev_humana.ods.bb_eob_item
-	ON bb_eob.pk_eob_id = bb_eob_item.fk_eob_id
-WHERE bb_eob.RECORD_STATUS_CD = 'a'
-	AND bb_eob_item.record_status_cd = 'a'
-	--AND load_period = 'm-2021-03'
-	AND SUBSTRING(bb_eob.LOAD_PERIOD, 3,7) = '2021-03'
-	AND len(bb_eob_item.src_service ) BETWEEN 3 AND 4
-
-	
-	
-SELECT *
-FROM dev_humana.ods.BB_EOB_ITEM_DETAIL 
-
-SELECT src_type, --rxcinv, rxdinv
-	 , count(*)
-FROM dev_humana.ods.BB_EOB_ITEM_DETAIL 
-WHERE RECORD_STATUS_CD = 'a'
-GROUP BY src_type
-
-WHERE FK_EOB_ID = 'cms_mssp|outpatient-1863245665'
-	
---no records at all
-SELECT * 
-FROM dev_humana.ods.BB_EOB_ADD_ITEM 
-
-SELECT * 
-FROM dev_humana.ods.BB_EOB_ADD_ITEM_detail
-
-
-WHERE FK_EOB_ID = 'cms_mssp|outpatient-1863245665'
-
-
-
-
-SELECT bb_eob.src_type  --none
-	, count(*) AS rwCnt
-FROM DEV_GEISINGER.ods.bb_eob
-JOIN DEV_GEISINGER.ods.bb_eob_item
-	ON bb_eob.pk_eob_id = bb_eob_item.fk_eob_id
-WHERE bb_eob.RECORD_STATUS_CD = 'a'
-	AND bb_eob_item.record_status_cd = 'a'
-	--AND load_period = 'm-2021-03'
-	AND SUBSTRING(bb_eob.LOAD_PERIOD, 3,7) = '2021-03'
-	AND len(bb_eob_item.src_service ) BETWEEN 3 AND 4
-GROUP BY src_type
-
-SELECT * FROM DEV_GEISINGER.ods.BB_EOB_PROCEDURE 
-	
---33 roww
-SELECT *
-FROM dev_humana.ods.bb_eob_item
-WHERE bb_eob_item.record_status_cd = 'a'
-AND len(bb_eob_item.src_service ) BETWEEN 3 AND 4
-
-		 --= '71' --also nope		
---	AND EXISTS -- no rows
---	(
---		SELECT 1
---		FROM dev_humana.ods.bb_eob_procedure
---		WHERE bb_eob.pk_eob_id = bb_eob_procedure.fk_eob_id
---		AND bb_eob_procedure.record_status_cd = 'a'
---	)
-	--AND bb_eob_item.src_service IS NOT null
-	
---GROUP BY src_type
---ORDER BY src_type
 
 --fac_proc filtering
 	--no records returning with this filter
+	--corrrect filtering likely relies on 
+	--data being populated in bb_eob_procedure, currently not populated
 
 SELECT 'fac_proc' AS activity_type_cd
 	, src_type
@@ -333,10 +256,13 @@ WHERE bb_eob.RECORD_STATUS_CD = 'a'
 							,'61' --Inpatient
 							) 
 	AND bb_eob_item.src_revenue IS null	
-	
-	
---phys filtering
 
+
+
+
+
+--phys filtering
+--3,248,492
 	
 WITH eobid 
 AS 
@@ -353,11 +279,102 @@ AS
 SELECT *	
 FROM eobid
 	pivot(max(src_value) FOR src_system IN (
-	'https://bluebutton.cms.gov/resources/variables/clm_id'  --pde claim don't populate this?
+	'https://bluebutton.cms.gov/resources/variables/clm_id'  --pde claims don't populate this?
 	, 'https://bluebutton.cms.gov/resources/identifier/claim-group'
 	)
 	) AS p (fk_eob_id, clm_id, claim_group)	
 )
+, allProvdrData
+AS 
+(
+SELECT fk_eob_id
+	, src_responsible
+	, src_role
+	, CASE 
+		WHEN src_role = 'primary' THEN 1
+		WHEN src_role = 'supervisor' THEN 2
+		WHEN src_role = 'assist' THEN 3
+		WHEN src_role = 'other' THEN 4
+		ELSE 5
+	  END role_value
+	, src_qualification
+	, src_sequence
+	, src_provider_npi
+	, ROW_NUMBER() OVER (PARTITION BY fk_eob_id ORDER BY src_sequence) AS rwNbr
+FROM ods.BB_EOB_CARE_TEAM
+WHERE record_status_cd = 'a'
+ORDER BY fk_eob_id
+	, src_sequence
+)
+--array agg sorting w/in groups identifying role vs. ID type (NPI) or activity_type_cd
+, allPrvdrRoleLabel
+AS 
+(
+select fk_eob_id
+	, array_agg(src_role || '|' || src_provider_npi) within group(order by src_sequence) as providerID
+	, array_agg(src_role) within group(order by src_sequence) as providerRole
+	, array_agg(src_qualification) within group(order by src_sequence) as providerSpclty
+FROM allProvdrData
+GROUP BY fk_eob_id
+)
+, allPrvdrNPILabel
+AS 
+(
+select fk_eob_id
+	, array_agg('npi_num' || '|' || src_provider_npi) within group(order by src_sequence) as providerID
+	, array_agg(src_role) within group(order by src_sequence) as providerRole
+	, array_agg(src_qualification) within group(order by src_sequence) as providerSpclty	
+FROM allProvdrData
+GROUP BY fk_eob_id
+)
+, primaryOnlyPrvdrNPILabel
+AS
+(
+select fk_eob_id
+	, array_agg('npi_num' || '|' || src_provider_npi) within group(order by src_sequence) as providerID
+	, array_agg(src_role) within group(order by src_sequence) as providerRole
+	, array_agg(src_qualification) within group(order by src_sequence) as providerSpclty		
+FROM allProvdrData
+WHERE array_contains(src_role::variant, array_construct('primary')) = TRUE   
+GROUP BY fk_eob_id
+)
+, allOtherPrvdrNPILabel
+AS
+(
+select fk_eob_id
+	, array_agg('npi_num' || '|' || src_provider_npi) within group(order by src_sequence) as providerID
+	, array_agg(src_role) within group(order by src_sequence) as providerRole
+	, array_agg(src_qualification) within group(order by src_sequence) as providerSpclty			
+FROM allProvdrData
+WHERE array_contains(src_role::variant, array_construct('supervisor','assist','other')) = TRUE   
+GROUP BY fk_eob_id
+)
+, eobDiagnosis
+AS
+(
+	SELECT fk_eob_id
+		, src_diagnosis_code
+		, src_diagnosis_reference
+		, src_type
+		, src_package_code  --is this the drg? repeated for each item?
+		, src_sequence
+		, ROW_NUMBER() OVER (PARTITION BY fk_eob_id ORDER BY src_sequence) AS rwNbr
+	FROM ods.bb_eob_diagnosis
+	where record_status_cd = 'a'
+	ORDER BY fk_eob_id
+		, src_sequence 
+
+)
+, allEOBDxCodeAgg
+AS 
+(
+	SELECT fk_eob_id
+	, array_agg('icd_10_cm' || '|' || src_diagnosis_code) within group(order by src_sequence) AS fkDiagCode
+	, array_agg(src_diagnosis_code) within group(order by src_sequence) AS diagCode
+	FROM eobDiagnosis 
+	GROUP BY fk_eob_id
+)
+
 SELECT 'phys' AS activity_type_cd
 	, src_type
 	, bb_eob.ORG_ID 
@@ -381,8 +398,10 @@ SELECT 'phys' AS activity_type_cd
 	, NULL AS ip_stay_from_dt
 	, NULL AS ip_stay_from_month_cd	
 	, NULL AS ip_stay_thru_month_cd
- 	, 'phys'||'|'||eobidPvt.clm_id||'|'||eobidPvt.claim_group||'|'||COALESCE(bb_eob_care_team.src_provider_npi,'#NA')||'|'||bb_eob.src_patient_reference||'|'||to_char(bb_eob_item.src_serviced_period_start,'m-YYYY-MM')||'|'||to_char(bb_eob_item.src_serviced_period_end,'m-YYYY-MM') AS fk_visit_id
-	, coalesce(bb_eob.src_billable_period_start, bb_eob_item.src_serviced_period_start) AS visit_from_dt
+-- 	, 'phys'||'|'||eobidPvt.clm_id||'|'||eobidPvt.claim_group||'|'||COALESCE(bb_eob_care_team.src_provider_npi,'#NA')||'|'||bb_eob.src_patient_reference||'|'||to_char(bb_eob_item.src_serviced_period_start,'m-YYYY-MM')||'|'||to_char(bb_eob_item.src_serviced_period_end,'m-YYYY-MM') AS fk_visit_id
+ 	, 'phys'||'|'||eobidPvt.clm_id||'|'||eobidPvt.claim_group||'|'||COALESCE(split_part(primaryOnlyPrvdrNPILabel.providerID[0],'|',2),'#NA')||'|'||bb_eob.src_patient_reference||'|'||to_char(bb_eob_item.src_serviced_period_start,'m-YYYY-MM')||'|'||to_char(bb_eob_item.src_serviced_period_end,'m-YYYY-MM') AS fk_visit_id
+
+ 	, coalesce(bb_eob.src_billable_period_start, bb_eob_item.src_serviced_period_start) AS visit_from_dt
 	, coalesce(bb_eob.src_billable_period_end, bb_eob_item.src_serviced_period_end) AS visit_thru_dt
 	, to_char(coalesce(bb_eob.src_billable_period_start, bb_eob_item.src_serviced_period_start) ,'m-YYYY-MM') AS visit_from_month_cd
 	, to_char(coalesce(bb_eob.src_billable_period_end, bb_eob_item.src_serviced_period_end) ,'m-YYYY-MM') AS visit_thru_month_cd
@@ -403,8 +422,32 @@ SELECT 'phys' AS activity_type_cd
 	, '#NA' AS fk_tin_id	
     -- src_clm_rndrg_prvdr_tax_num fk_tin_rendering_id
     , '#NA' AS fk_tin_rendering_id
-    
- 	, bb_eob.pk_eob_id
+    , COALESCE(primaryOnlyPrvdrNPILabel.providerID,array_construct('#NA')) AS fk_provider_id_list   
+    --'npi_num'||'|'||c.src_rndrg_prvdr_npi_num AS fk_provider_primary_id
+	, trim(primaryOnlyPrvdrNPILabel.providerID[0]) AS fk_provider_primary_id    
+ 	, '#NA' AS fk_provider_operating_id
+    , '#NA' AS fk_provider_attending_id
+    , '#NA' AS fk_provider_other_id 
+    , trim(primaryOnlyPrvdrNPILabel.providerID[0]) AS fk_provider_rendering_id 
+	--c.src_clm_prvdr_spclty_cd AS provider_rendering_specialty_cd    
+	, trim(primaryOnlyPrvdrNPILabel.providerSpclty[0]) AS provider_rendering_speecialty_cd  
+	--c.src_rndrg_prvdr_type_cd AS provider_rendering_type_cd	
+	, trim(primaryOnlyPrvdrNPILabel.providerRole[0]) AS provider_rendering_type_cd
+	
+	, '#NA' AS fk_provider_pay_to_id
+    , '#NA' AS fk_provider_ordering_id
+    , '#NA' AS fk_provider_dispensing_id
+    , '#NA' AS provider_dispensing_id_type_cd
+    , '#NA' AS fk_provider_prescribing_id
+    , '#NA' AS provider_prescribing_id_type_cd	
+	, allEOBDxCodeAgg.fkDiagCode AS fk_diagnosis_id_list
+	, TO_ARRAY('#NA') AS diagnosis_provider_detail_icd_9_cd_list
+	, allEOBDxCodeAgg.diagCode AS diagnosis_provider_detail_icd_10_cd_list	
+	, COALESCE('hcpcs_cd'||'|'||bb_eob_item.src_service,'#NA') AS fk_procedure_id
+	, COALESCE(xref.target_1_value, '#NA') AS procedure_betos_cd
+	, COALESCE(bb_eob_item.src_service,'#NA') AS procedure_hcpcs_cd
+	
+	, bb_eob.pk_eob_id
 	, bb_eob.src_claim_reference
 	, bb_eob_item.src_serviced_date
 	, bb_eob_item.src_serviced_period_start
@@ -424,150 +467,95 @@ SELECT 'phys' AS activity_type_cd
 FROM DEV_HUMANA.ods.bb_eob
 JOIN dev_humana.ods.bb_eob_item
 	ON bb_eob.pk_eob_id = bb_eob_item.fk_eob_id
-LEFT JOIN ods.BB_EOB_CARE_TEAM   --src_provider_npi
-	ON bb_eob.pk_eob_id = bb_eob_care_team.fk_eob_id
-	AND bb_eob_care_team.record_status_cd = 'a'
-	AND bb_eob_care_team.SRC_SEQUENCE = 2
+--LEFT JOIN ods.BB_EOB_CARE_TEAM   --src_provider_npi
+--	ON bb_eob.pk_eob_id = bb_eob_care_team.fk_eob_id
+--	AND bb_eob_care_team.record_status_cd = 'a'
+--	AND bb_eob_care_team.SRC_SEQUENCE = 2
+LEFT JOIN primaryOnlyPrvdrNPILabel
+	ON bb_eob.pk_eob_id = primaryOnlyPrvdrNPILabel.fk_eob_id
 LEFT JOIN eobidPvt
 	ON bb_eob.pk_eob_id = eobidPvt.fk_eob_id
+LEFT JOIN allEOBDxCodeAgg
+	ON bb_eob.pk_eob_id = allEOBDxCodeAgg.fk_eob_id
+LEFT JOIN dev_common.ref.code_xref_map xref
+    ON bb_eob_item.src_service = xref.source_1_value
+        AND xref.xref_id = 'hcpcs_x_betos'		
 WHERE bb_eob.RECORD_STATUS_CD = 'a'
 	AND bb_eob_item.record_status_cd = 'a'
 	--AND load_period = 'm-2021-03'
 	AND SUBSTRING(bb_eob.LOAD_PERIOD, 3,7) = '2021-03'
 	AND bb_eob.src_type IN ('71','72') 
 
-	
-	
-	
-	
-SELECT src_value
-	, src_eob_id
---	, SRC_TYPE 
-	, SRC_SYSTEM 
---SELECT *	
-FROM ods.BB_EOB_IDENTIFIER 
-where FK_EOB_ID = 'cms_mssp|carrier-10479839850'
-	AND RECORD_STATUS_CD = 'a'
-	AND SRC_SYSTEM LIKE '%clm_id'
 
-https://bluebutton.cms.gov/resources/variables/clm_id	
-https://bluebutton.cms.gov/resources/identifier/claim-group
 
-SELECT fk_eob_id
-	, p.*
---SELECT *	
-FROM ods.BB_EOB_IDENTIFIER 
-	pivot(sum(src_value) FOR src_system IN (
-	'https://bluebutton.cms.gov/resources/variables/clm_id'
-	, 'https://bluebutton.cms.gov/resources/identifier/claim-group'
-	)
-	) AS p
-where FK_EOB_ID = 'cms_mssp|carrier-10479839850'
-	AND RECORD_STATUS_CD = 'a'	
-	
-WITH eobid 
+--dme filtering
+	--I don't see any dme data, sql below doesn't pull records but there're no errors
+		
+WITH allProvdrData
 AS 
 (
-SELECT src_eob_id
-	, src_value
---	, SRC_TYPE 
-	, SRC_SYSTEM 
---SELECT *	
-FROM ods.BB_EOB_IDENTIFIER 
-where FK_EOB_ID = 'cms_mssp|carrier-10479839850'
-	AND RECORD_STATUS_CD = 'a'
+SELECT fk_eob_id
+	, src_responsible
+	, src_role
+	, CASE 
+		WHEN src_role = 'primary' THEN 1
+		WHEN src_role = 'supervisor' THEN 2
+		WHEN src_role = 'assist' THEN 3
+		WHEN src_role = 'other' THEN 4
+		ELSE 5
+	  END role_value
+	, src_qualification
+	, src_sequence
+	, src_provider_npi
+	, ROW_NUMBER() OVER (PARTITION BY fk_eob_id ORDER BY src_sequence) AS rwNbr
+FROM ods.BB_EOB_CARE_TEAM
+WHERE record_status_cd = 'a'
+ORDER BY fk_eob_id
+	, src_sequence
 )
-SELECT *	
-FROM eobid
-	pivot(max(src_value) FOR src_system IN (
-	'https://bluebutton.cms.gov/resources/variables/clm_id'
-	, 'https://bluebutton.cms.gov/resources/identifier/claim-group'
-	)
-	) AS p
-
-WITH eobid 
+--array agg sorting w/in groups identifying role vs. ID type (NPI) or activity_type_cd
+, allPrvdrRoleLabel
 AS 
 (
-SELECT src_eob_id
-	, src_value
---	, SRC_TYPE 
-	, SRC_SYSTEM 
---SELECT *	
-FROM ods.BB_EOB_IDENTIFIER 
-where FK_EOB_ID = 'cms_mssp|carrier-10479839850'
-	AND RECORD_STATUS_CD = 'a'
+select fk_eob_id
+	, array_agg(src_role || '|' || src_provider_npi) within group(order by src_sequence) as providerID
+	, array_agg(src_role) within group(order by src_sequence) as providerRole
+	, array_agg(src_qualification) within group(order by src_sequence) as providerSpclty
+FROM allProvdrData
+GROUP BY fk_eob_id
 )
-SELECT *	
-FROM eobid
-	pivot(max(src_value) FOR src_system IN (
-	'https://bluebutton.cms.gov/resources/variables/clm_id'
-	, 'https://bluebutton.cms.gov/resources/identifier/claim-group'
-	)
-	) AS p (src_eob_id, clm_id, claim_group)
-
-
-
-
-
-SELECT fk_eob_id
-	, p.*
---SELECT *	
-FROM ods.BB_EOB_IDENTIFIER 
-	pivot(sum(src_value) FOR src_system IN (
-	'https://bluebutton.cms.gov/resources/variables/clm_id'
-	, 'https://bluebutton.cms.gov/resources/identifier/claim-group'
-	)
-	) AS p
-where FK_EOB_ID = 'cms_mssp|carrier-10479839850'
-	AND RECORD_STATUS_CD = 'a'		
-	
-USE WAREHOUSE dev_humana;
-USE DATABASE dev_humana;
-	
-SELECT *
-FROM ods.BB_EOB_CARE_TEAM 
-WHERE 
---FK_EOB_ID = 'cms_bb|carrier-10479839850'
---'cms_mssp|carrier-10479839850'
---AND 
-RECORD_STATUS_CD = 'a'
-AND FK_EOB_ID LIKE '%carrier%'
-AND FK_EOB_ID LIKE 'cms_bb%'  --one record, load_period 'm-2020-11'
-
-FK_EOB_ID
-cms_mssp|carrier--21731989082
-
---mixed dash and double dash in the pk
-
-SELECT count(*) --602,970 OUT OF 1,756,090
-SELECT bb_eob_care_team.*
-FROM ods.bb_eob 
-JOIN ods.BB_EOB_CARE_TEAM 
-	ON bb_eob.pk_eob_id = bb_eob_care_team.fk_eob_id
-WHERE 
-
-	bb_eob.RECORD_STATUS_CD = 'a'
-	AND bb_eob_care_team.record_status_cd = 'a'
---AND PK_EOB_ID LIKE 'cms_bb%'  --none of these
-	AND SUBSTRING(bb_eob.LOAD_PERIOD, 3,7) = '2021-03'
-	AND bb_eob.src_type IN ('71','72') 
-	AND bb_eob_care_team.SRC_SEQUENCE = 2 --602,970
-
-
-SELECT *  --no reecords
-FROM DEV_HUMANA.ods.bb_eob
-WHERE RECORD_STATUS_CD = 's'	
-	AND SRC_TYPE IN ('81','82')	
-
-SELECT *  --no reecords
-FROM DEV_GEISINGER.ods.bb_eob
-WHERE RECORD_STATUS_CD = 's'	
-	AND SRC_TYPE IN ('81','82')		
-
-	
---dme filteering
-	--I don't see any dme data
-	
+, allPrvdrNPILabel
+AS 
+(
+select fk_eob_id
+	, array_agg('npi_num' || '|' || src_provider_npi) within group(order by src_sequence) as providerID
+	, array_agg(src_role) within group(order by src_sequence) as providerRole
+	, array_agg(src_qualification) within group(order by src_sequence) as providerSpclty	
+FROM allProvdrData
+GROUP BY fk_eob_id
+)
+, primaryOnlyPrvdrNPILabel
+AS
+(
+select fk_eob_id
+	, array_agg('npi_num' || '|' || src_provider_npi) within group(order by src_sequence) as providerID
+	, array_agg(src_role) within group(order by src_sequence) as providerRole
+	, array_agg(src_qualification) within group(order by src_sequence) as providerSpclty		
+FROM allProvdrData
+WHERE array_contains(src_role::variant, array_construct('primary')) = TRUE   
+GROUP BY fk_eob_id
+)
+, allOtherPrvdrNPILabel
+AS
+(
+select fk_eob_id
+	, array_agg('npi_num' || '|' || src_provider_npi) within group(order by src_sequence) as providerID
+	, array_agg(src_role) within group(order by src_sequence) as providerRole
+	, array_agg(src_qualification) within group(order by src_sequence) as providerSpclty			
+FROM allProvdrData
+WHERE array_contains(src_role::variant, array_construct('supervisor','assist','other')) = TRUE   
+GROUP BY fk_eob_id
+)	
 SELECT 'dme' AS activity_type_cd
 	, src_type
 	, bb_eob.ORG_ID 
@@ -608,12 +596,23 @@ SELECT 'dme' AS activity_type_cd
     , '#NA' AS facility_revenue_center_cd 
     , '#NA' AS fk_tin_id
     , '#NA' AS fk_tin_rendering_id    
-    
-    
+	, allPrvdrNPILabel.providerID AS fk_provider_id_list
+	, coalesce(trim(primaryOnlyPrvdrNPILabel.providerID[0]), 'npiNum|#NA') AS fk_provider_primary_id 
+	, '#NA' AS fk_provider_operating_id
+    , '#NA' AS fk_provider_attending_id
+    , '#NA' AS fk_provider_other_id
+    , '#NA' AS fk_provider_rendering_id
+    , '#NA' AS provider_rendering_specialty_cd
+    , '#NA' AS provider_rendering_type_cd
+	, coalesce(trim(primaryOnlyPrvdrNPILabel.providerID[0]), 'npiNum|#NA') AS fk_provider_pay_to_id
+	, coalesce(trim(primaryOnlyPrvdrNPILabel.providerID[0]), 'npiNum|#NA') AS fk_provider_ordering_id
 	--, c.src_clm_pos_cd AS facility_place_of_service_cd    
     , bb_eob_item.src_location_code AS facility_place_of_service_cd
 	, bb_eob_item.src_revenue --map to facility_revenue_center_cd 
-	
+	, '#NA' AS fk_provider_dispensing_id
+    , '#NA' AS provider_dispensing_id_type_cd
+    , '#NA' AS fk_provider_prescribing_id
+    , '#NA' AS provider_prescribing_id_type_cd	
 	
 	, bb_eob_item.src_service
 	, bb_eob.SRC_PROVIDER_REFERENCE 
@@ -624,6 +623,10 @@ SELECT 'dme' AS activity_type_cd
 FROM DEV_HUMANA.ods.bb_eob
 JOIN DEV_HUMANA.ods.bb_eob_item
 	ON bb_eob.pk_eob_id = bb_eob_item.fk_eob_id
+LEFT JOIN allPrvdrNPILabel
+	ON bb_eob.pk_eob_id = allPrvdrNPILabel.fk_eob_id
+LEFT JOIN primaryOnlyPrvdrNPILabel
+	ON bb_eob.pk_eob_id = primaryOnlyPrvdrNPILabel.fk_eob_id
 WHERE bb_eob.RECORD_STATUS_CD = 'a'
 	AND bb_eob_item.record_status_cd = 'a'
 	--AND load_period = 'm-2021-03'
@@ -631,12 +634,80 @@ WHERE bb_eob.RECORD_STATUS_CD = 'a'
 	AND bb_eob.src_type in ('81'
 							,'82'
 	) 	
+
 	
 --med filtering
+--826,814
 
 USE WAREHOUSE dev_humana;
 USE DATABASE dev_humana;
-	
+
+WITH allProvdrData
+AS 
+(
+SELECT fk_eob_id
+	, src_responsible
+	, src_role
+	, CASE 
+		WHEN src_role = 'primary' THEN 1
+		WHEN src_role = 'supervisor' THEN 2
+		WHEN src_role = 'assist' THEN 3
+		WHEN src_role = 'other' THEN 4
+		ELSE 5
+	  END role_value
+	, src_qualification
+	, src_sequence
+	, src_provider_npi
+	, ROW_NUMBER() OVER (PARTITION BY fk_eob_id ORDER BY src_sequence) AS rwNbr
+FROM ods.BB_EOB_CARE_TEAM
+WHERE record_status_cd = 'a'
+ORDER BY fk_eob_id
+	, src_sequence
+)
+--array agg sorting w/in groups identifying role vs. ID type (NPI) or activity_type_cd
+, allPrvdrRoleLabel
+AS 
+(
+select fk_eob_id
+	, array_agg(src_role || '|' || src_provider_npi) within group(order by src_sequence) as providerID
+	, array_agg(src_role) within group(order by src_sequence) as providerRole
+	, array_agg(src_qualification) within group(order by src_sequence) as providerSpclty
+FROM allProvdrData
+GROUP BY fk_eob_id
+)
+, allPrvdrNPILabel
+AS 
+(
+select fk_eob_id
+	, array_agg('npi_num' || '|' || src_provider_npi) within group(order by src_sequence) as providerID
+	, array_agg(src_role) within group(order by src_sequence) as providerRole
+	, array_agg(src_qualification) within group(order by src_sequence) as providerSpclty	
+FROM allProvdrData
+GROUP BY fk_eob_id
+)
+, primaryOnlyPrvdrNPILabel
+AS
+(
+select fk_eob_id
+	, array_agg('npi_num' || '|' || src_provider_npi) within group(order by src_sequence) as providerID
+	, array_agg(src_role) within group(order by src_sequence) as providerRole
+	, array_agg(src_qualification) within group(order by src_sequence) as providerSpclty		
+FROM allProvdrData
+WHERE array_contains(src_role::variant, array_construct('primary')) = TRUE   
+GROUP BY fk_eob_id
+)
+, allOtherPrvdrNPILabel
+AS
+(
+select fk_eob_id
+	, array_agg('npi_num' || '|' || src_provider_npi) within group(order by src_sequence) as providerID
+	, array_agg(src_role) within group(order by src_sequence) as providerRole
+	, array_agg(src_qualification) within group(order by src_sequence) as providerSpclty			
+FROM allProvdrData
+WHERE array_contains(src_role::variant, array_construct('supervisor','assist','other')) = TRUE   
+GROUP BY fk_eob_id
+)
+
 SELECT 'med' AS activity_type_cd
 	, src_type
 	, bb_eob.ORG_ID 
@@ -654,9 +725,12 @@ SELECT 'med' AS activity_type_cd
     , NULL AS ip_stay_thru_dt
     , NULL AS ip_stay_from_month_cd
     , NULL AS ip_stay_thru_month_cd
-	, 'med'||'|'||bb_eob_care_team.src_provider_npi||'|'||bb_eob.src_patient_reference||'|'||
-	  to_char(COALESCE(bb_eob_item.src_serviced_date,CAST('1900-01-01' AS DATE)),'YYYYMMDD') AS fk_visit_id
-       --the following visit dates calculate the same as the Activity data as in Insights
+--	, 'med'||'|'||bb_eob_care_team.src_provider_npi||'|'||bb_eob.src_patient_reference||'|'||
+--	  to_char(COALESCE(bb_eob_item.src_serviced_date,CAST('1900-01-01' AS DATE)),'YYYYMMDD') AS fk_visit_id
+	, 'med'||'|'||split_part(primaryOnlyPrvdrNPILabel.providerID[0],'|',2)||'|'||bb_eob.src_patient_reference||'|'||
+	  to_char(COALESCE(bb_eob_item.src_serviced_date,CAST('1900-01-01' AS DATE)),'YYYYMMDD') AS fk_visit_id	  
+
+	  --the following visit dates calculate the same as the Activity data as in Insights
  	, bb_eob_item.src_serviced_date AS visit_from_dt 	
 	, bb_eob_item.src_serviced_date AS visit_thru_dt	
 	, TO_CHAR(bb_eob_item.src_serviced_date,'m-YYYY-MM') AS visit_from_month_cd
@@ -672,8 +746,22 @@ SELECT 'med' AS activity_type_cd
     , '#NA' AS fk_facility_rev_ctr_id
     , '#NA' AS facility_revenue_center_cd
 	, '#NA' AS fk_tin_id
-	, '#NA' AS fk_tin_rendering_id		
-	
+	, '#NA' AS fk_tin_rendering_id
+	, allPrvdrNPILabel.providerID AS fk_provider_id_list
+	, trim(primaryOnlyPrvdrNPILabel.providerID[0]) AS fk_provider_primary_id
+	, '#NA' AS fk_provider_operating_id
+    , '#NA' AS fk_provider_attending_id
+    , '#NA' AS fk_provider_other_id
+    , '#NA' AS fk_provider_rendering_id
+    , '#NA' AS provider_rendering_specialty_cd
+    , '#NA' AS provider_rendering_type_cd
+    , '#NA' AS fk_provider_pay_to_id
+    , '#NA' AS fk_provider_ordering_id	
+    , '#NA' AS fk_provider_dispensing_id
+	, '#NA' AS provider_dispensing_id_type_cd
+	, '#NA' AS fk_provider_prescribing_id
+	, '#NA' AS provider_prescribing_id_type_cd
+    
 	, bb_eob.pk_eob_id
 	, bb_eob_item.src_revenue --map to facility_revenue_center_cd 
 	, bb_eob_item.src_service
@@ -685,106 +773,17 @@ SELECT 'med' AS activity_type_cd
 FROM DEV_HUMANA.ods.bb_eob
 JOIN dev_humana.ods.bb_eob_item
 	ON bb_eob.pk_eob_id = bb_eob_item.fk_eob_id
-LEFT JOIN ods.BB_EOB_CARE_TEAM   --src_provider_npi
-	ON bb_eob.pk_eob_id = bb_eob_care_team.fk_eob_id
-	AND bb_eob_care_team.record_status_cd = 'a'
-	AND bb_eob_care_team.SRC_SEQUENCE = 2	
+--LEFT JOIN ods.BB_EOB_CARE_TEAM   --src_provider_npi
+--	ON bb_eob.pk_eob_id = bb_eob_care_team.fk_eob_id
+--	AND bb_eob_care_team.record_status_cd = 'a'
+--	AND bb_eob_care_team.SRC_SEQUENCE = 2
+LEFT JOIN primaryOnlyPrvdrNPILabel
+	ON bb_eob.pk_eob_id = primaryOnlyPrvdrNPILabel.fk_eob_id
+LEFT JOIN allPrvdrNPILabel
+	ON bb_eob.pk_eob_id = allPrvdrNPILabel.fk_eob_id
 WHERE bb_eob.RECORD_STATUS_CD = 'a'
 	AND bb_eob_item.record_status_cd = 'a'
 	--AND load_period = 'm-2021-03'
 	AND SUBSTRING(bb_eob.LOAD_PERIOD, 3,7) = '2021-03'
 	AND bb_eob.src_type = 'PDE'
-	
-PK_EOB_ID
-cms_mssp|pde-551279807
-cms_mssp|pde-5914722060
-cms_mssp|pde-7230314532
 
-SELECT fk_eob_id
-	, src_responsible
-	, src_role
-	, src_qualification
-	, src_sequence
-	, src_provider_npi
-	, ROW_NUMBER() OVER (PARTITION BY fk_eob_id ORDER BY src_sequence) AS rwNbr
---SELECT * 
-FROM ods.BB_EOB_CARE_TEAM
-WHERE record_status_cd = 'a'
-AND fk_eob_id IN (
-'cms_mssp|outpatient-1772697339'
-,'cms_mssp|outpatient-1163525072'
-,'cms_mssp|outpatient-1774328067'
-)
-ORDER BY fk_eob_id
-
-
-
-
-
-
-PK_EOB_CARE_TEAM_ID
-cms_mssp|outpatient-1163525072|9999999999
-
-SELECT *   ---src_sequence 4,5
-FROM ods.BB_EOB_CARE_TEAM
-WHERE fk_eob_id = 'cms_mssp|outpatient-1163525072'
---PK_EOB_CARE_TEAM_ID = 'cms_mssp|outpatient-1163525072|9999999999'
-AND record_status_cd = 'a'
-ORDER BY src_sequence 
-
-SELECT bb_eob.pk_eob_id
-	, count(*) AS recCnt
-FROM ods.bb_eob
-JOIN ods.BB_EOB_CARE_TEAM   --src_provider_npi
-	ON bb_eob.pk_eob_id = bb_eob_care_team.fk_eob_id
-WHERE bb_eob_care_team.record_status_cd = 'a'
-	AND bb_eob.record_status_cd = 'a'
-	AND bb_eob.src_type = 'PDE'  --no multiples
-GROUP BY pk_eob_id
-HAVING count(*) > 1
-
-SELECT bb_eob.src_type
-	, bb_eob.pk_eob_id
-	, count(*) AS recCnt
-	, min(src_sequence) AS minSrcSqnc
-FROM ods.bb_eob
-JOIN ods.BB_EOB_CARE_TEAM   --src_provider_npi
-	ON bb_eob.pk_eob_id = bb_eob_care_team.fk_eob_id
-WHERE bb_eob_care_team.record_status_cd = 'a'
-	AND bb_eob.record_status_cd = 'a'
-	AND bb_eob.src_type <> '40'  --no records when Not outpatient
-	--= 'PDE'  --no multiples
-GROUP BY bb_eob.src_type, pk_eob_id
-HAVING count(*) > 1   --when row count is 1, min src sequence *is* often 2
-						--when row count > 1 min src sequescee is  often 4 
-AND min(src_sequence) = 2
-
-SELECT *
-FROM ods.BB_EOB_CARE_TEAM 
-WHERE record_status_cd = 'a'
-AND src_role <> 'primary'  --only 2 claims with src_sequence 2 and 3 the exception to usual
---2 records: 'assist', 'other'..   looks like outpatient claims
---other roles are 'primary' and 'supervisor'
-
---https://community.snowflake.com/s/question/0D50Z00008izVcQSAU/filter-array-elements
---https://docs.snowflake.com/en/sql-reference/functions/array_to_string.html
-
---array agg sorting w/in groups identifying role vs. ID type or activity_type_cd
-select fk_eob_id
-	, array_agg(src_role || '|' || src_provider_npi) within group(order by src_sequence) as fk_provider_list
-FROM ods.BB_EOB_CARE_TEAM 
-WHERE record_status_cd = 'a'
-
---filtering with array_contains and array_construct
-
-select fk_eob_id
-	, array_agg(src_role || '|' || src_provider_npi) within group(order by src_sequence) as fk_provider_list
-FROM ods.BB_EOB_CARE_TEAM 
-WHERE record_status_cd = 'a'
-	and array_contains(src_role, array_construct('primary', 'supervisor')) = TRUE
-
-select fk_eob_id
-	, array_agg(src_role || '|' || src_provider_npi) within group(order by src_sequence) as fk_provider_list
-FROM ods.BB_EOB_CARE_TEAM 
-WHERE record_status_cd = 'a'
-	and array_contains(src_role, array_construct('assist','other','supervisor')) = FALSE
