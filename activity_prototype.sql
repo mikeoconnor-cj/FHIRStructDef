@@ -184,6 +184,21 @@ SELECT 'fac_rev' AS activity_type_cd
 	, 'hcpcs_cd'||'|'||COALESCE(bb_eob_item.src_service,'#NA') AS fk_procedure_id
 	, COALESCE(xref.target_1_value, '#NA') AS procedure_betos_cd
 	, COALESCE(bb_eob_item.src_service,'#NA') AS procedure_hcpcs_cd
+	, ARRAY_CONSTRUCT(
+            COALESCE(bb_eob_item.src_modifier[0].coding[0]['code'],'#NA')
+          , COALESCE(bb_eob_item.src_modifier[1].coding[0]['code'],'#NA')
+          , COALESCE(bb_eob_item.src_modifier[2].coding[0]['code'],'#NA')
+          , COALESCE(bb_eob_item.src_modifier[3].coding[0]['code'],'#NA')
+          , COALESCE(bb_eob_item.src_modifier[4].coding[0]['code'],'#NA')
+      ) AS procedure_hcpcs_mod_cd_list
+	, '#NA' AS procedure_icd_9_cd
+    , '#NA' AS procedure_icd_10_cd      
+	--, COALESCE(h.src_clm_op_srvc_type_cd,'#NA') AS service_op_type_cd
+	-- bb standard favours carries claims for below field
+	, '#NA' AS service_op_type_cd
+	, '#NA' AS service_cms_type_cd
+	-- c.src_clm_line_srvc_unit_qty AS service_units
+	, bb_eob_item.src_quantity AS service_units
 	
 	, bb_eob.eff_start_dt
 	, bb_eob.eff_end_dt
@@ -230,6 +245,8 @@ WHERE bb_eob.RECORD_STATUS_CD = 'a'
 							) 
 							
 
+							
+
 	AND bb_eob_item.src_revenue IS NOT NULL  --there's no diff in # of rows retrieved
 
 
@@ -269,6 +286,50 @@ WHERE bb_eob.RECORD_STATUS_CD = 'a'
 
 --alternative
 
+WITH allProvdrData
+AS 
+(
+SELECT fk_eob_id
+	, src_responsible
+	, src_role
+	, CASE 
+		WHEN src_role = 'primary' THEN 1
+		WHEN src_role = 'supervisor' THEN 2
+		WHEN src_role = 'assist' THEN 3
+		WHEN src_role = 'other' THEN 4
+		ELSE 5
+	  END role_value
+	, src_qualification
+	, src_sequence
+	, src_provider_npi
+	, ROW_NUMBER() OVER (PARTITION BY fk_eob_id ORDER BY src_sequence) AS rwNbr
+FROM ods.BB_EOB_CARE_TEAM
+WHERE record_status_cd = 'a'
+ORDER BY fk_eob_id
+	, src_sequence
+)
+--array agg sorting w/in groups identifying role vs. ID type (NPI) or activity_type_cd
+, allPrvdrRoleLabel
+AS 
+(
+select fk_eob_id
+	, array_agg(src_role || '|' || src_provider_npi) within group(order by src_sequence) as providerID
+	, array_agg(src_role) within group(order by src_sequence) as providerRole
+	, array_agg(src_qualification) within group(order by src_sequence) as providerSpclty
+FROM allProvdrData
+GROUP BY fk_eob_id
+)
+, allPrvdrNPILabel
+AS 
+(
+select fk_eob_id
+	, array_agg('npi_num' || '|' || src_provider_npi) within group(order by src_sequence) as providerID
+	, array_agg(src_role) within group(order by src_sequence) as providerRole
+	, array_agg(src_qualification) within group(order by src_sequence) as providerSpclty	
+FROM allProvdrData
+GROUP BY fk_eob_id
+)	
+	
 SELECT '{{dag_run.conf.org_id}}' AS org_id    --'HUMANA'
 	, 'fac_proc'||'|'|| bb_eob_procedure.pk_eob_procedure_id AS pk_activity_id
 	, 'fac_proc' AS activity_type_cd
@@ -347,8 +408,9 @@ SELECT '{{dag_run.conf.org_id}}' AS org_id    --'HUMANA'
     , '#NA' AS facility_revenue_center_cd
     , '#NA' AS fk_tin_id
     , '#NA' AS fk_tin_rendering_id	
-	
-	
+	, allPrvdrNPILabel.providerID AS fk_provider_id_list
+	--, to_array('npi_num'||'|'||bb_eob_care_team.src_provider_npi) AS fk_provider_id_list2		
+
 	, 'icd_10_pcs_cd'||'|'||bb_eob_procedure.src_procedure_code AS fk_procedure_id
 	, '#NA' AS procedure_betos_cd
     , '#NA' AS procedure_hcpcs_cd
@@ -357,7 +419,18 @@ SELECT '{{dag_run.conf.org_id}}' AS org_id    --'HUMANA'
 	, bb_eob_procedure.src_procedure_code AS procedure_icd_10_cd
 FROM DEV_HUMANA.ods.bb_eob
 JOIN dev_humana.ods.BB_EOB_PROCEDURE 
-	ON bb_eob.pk_eob_id = bb_eob_procedure.fk_eob_id	
+	ON bb_eob.pk_eob_id = bb_eob_procedure.fk_eob_id
+LEFT JOIN allPrvdrNPILabel
+	ON bb_eob.pk_eob_id = allPrvdrNPILabel.fk_eob_id
+--alternative  ... use careTeamLinkID[0] and pick the one provider
+		--BB Standards regarding requirement for careTeamLinkID within Item
+		--is inconsistent with data provided in BB sandbox and dev_humana 
+		--around Carrier and Inpatient EOBs
+			--but I don't go to bb_eob_item in this query
+--LEFT JOIN ods.BB_EOB_CARE_TEAM 
+--	ON bb_eob.pk_eob_id = bb_eob_care_team.fk_eob_id
+--	AND bb_eob_item.src_care_Team_Link_ID[0] = bb_eob_care_team.src_sequence
+--	AND bb_eob_care_team.record_status_cd = 'a'	
 WHERE bb_eob.RECORD_STATUS_CD = 'a'
 	AND bb_eob_procedure.record_status_cd = 'a'
 	--AND load_period = 'm-2021-03'
@@ -371,7 +444,7 @@ WHERE bb_eob.RECORD_STATUS_CD = 'a'
 							,'61' --Inpatient
 							) 	
 	--AND bb_eob_item.src_revenue IS null	
-	
+
 
 
 
