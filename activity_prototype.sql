@@ -161,6 +161,7 @@ SELECT 'fac_rev' AS activity_type_cd
     , '#NA' AS fk_tin_id
     , '#NA' AS fk_tin_rendering_id	
 	, allPrvdrNPILabel.providerID AS fk_provider_id_list
+	, to_array('npi_num'||'|'||bb_eob_care_team.src_provider_npi) AS fk_provider_id_list2
 	, coalesce(trim(primaryOnlyPrvdrNPILabel.providerID[0]), 'npiNum|#NA') AS fk_provider_primary_id 
 	--, 'npi_num'||'|'||COALESCE(h.src_oprtg_prvdr_npi_num,'#NA') AS fk_provider_operating_id
 	, '#NA' AS fk_provider_operating_id	
@@ -202,6 +203,12 @@ JOIN dev_humana.ods.bb_eob_item
 	ON bb_eob.pk_eob_id = bb_eob_item.fk_eob_id
 LEFT JOIN allPrvdrNPILabel
 	ON bb_eob.pk_eob_id = allPrvdrNPILabel.fk_eob_id
+--alternative  ... use careTeamLinkID[0] and pick the one provider
+		--why is careTeamLinkID an array?
+LEFT JOIN ods.BB_EOB_CARE_TEAM 
+	ON bb_eob.pk_eob_id = bb_eob_care_team.fk_eob_id
+	AND bb_eob_item.src_care_Team_Link_ID[0] = bb_eob_care_team.src_sequence
+	AND bb_eob_care_team.record_status_cd = 'a'
 LEFT JOIN primaryOnlyPrvdrNPILabel
 	ON bb_eob.pk_eob_id = primaryOnlyPrvdrNPILabel.fk_eob_id
 LEFT JOIN allOtherPrvdrNPILabel
@@ -221,6 +228,9 @@ WHERE bb_eob.RECORD_STATUS_CD = 'a'
 							,'60' --Inpatient
 							,'61' --Inpatient
 							) 
+							
+
+	AND bb_eob_item.src_revenue IS NOT NULL  --there's no diff in # of rows retrieved
 
 
 
@@ -257,7 +267,111 @@ WHERE bb_eob.RECORD_STATUS_CD = 'a'
 							) 
 	AND bb_eob_item.src_revenue IS null	
 
+--alternative
 
+SELECT '{{dag_run.conf.org_id}}' AS org_id    --'HUMANA'
+	, 'fac_proc'||'|'|| bb_eob_procedure.pk_eob_procedure_id AS pk_activity_id
+	, 'fac_proc' AS activity_type_cd
+	, bb_eob_procedure.src_date AS activity_from_dt
+	, bb_eob_procedure.src_date AS activity_thru_dt
+	, TO_CHAR(bb_eob_procedure.src_date,'m-YYYY-MM') AS activity_from_month_cd
+	, TO_CHAR(bb_eob_procedure.src_date,'m-YYYY-MM') AS activity_thru_month_cd
+	, CASE
+          WHEN bb_eob.src_type IN ('10','20','30','50','60','61')
+              THEN 'fac'||'|'||'012345'||'|'||'0123455689'||'|'||bb_eob.src_patient_reference||'|'||TO_CHAR(bb_eob.src_billable_period_start,'YYYYMMDD')||'|'||TO_CHAR(bb_eob.src_billable_period_end,'YYYYMMDD')
+          ELSE
+              '#NA'
+      END AS fk_ip_stay_id	
+	, CASE
+          WHEN bb_eob.src_type IN ('10','20','30','50','60','61')
+              THEN bb_eob.src_billable_period_start
+          ELSE
+              NULL
+      END AS ip_stay_from_dt
+	, CASE
+          WHEN bb_eob.src_type IN ('10','20','30','50','60','61')
+              THEN bb_eob.src_billable_period_end
+          ELSE
+              NULL
+      END AS ip_stay_thru_dt      
+	, CASE
+          WHEN bb_eob.src_type IN ('10','20','30','50','60','61')
+              THEN TO_CHAR(bb_eob.src_billable_period_start, 'm-YYYY-MM')
+          ELSE
+              NULL
+      END AS ip_stay_from_month_cd 
+	, CASE
+          WHEN bb_eob.src_type IN ('10','20','30','50','60','61')
+              THEN TO_CHAR(bb_eob.src_billable_period_end, 'm-YYYY-MM')
+          ELSE
+              NULL
+      END AS ip_stay_thru_month_cd      
+	, CASE
+          WHEN bb_eob.src_type = '40'
+              THEN 'fac_proc'||'|'||'012345'||'|'||'0123456789'||'|'||bb_eob.src_patient_reference||'|'||TO_CHAR(bb_eob.src_billable_period_start,'YYYYMMDD')||'|'||TO_CHAR(bb_eob.src_billable_period_end,'YYYYMMDD')
+          ELSE
+              '#NA'
+      END AS fk_visit_id 
+	, CASE
+          WHEN bb_eob.src_type  = '40'
+              THEN bb_eob.src_billable_period_start
+          ELSE
+              NULL
+      END AS visit_from_dt      
+	, CASE
+          WHEN bb_eob.src_type IN ('10','40') --why '10' too..error? 
+              THEN bb_eob.src_billable_period_end
+          ELSE
+              NULL
+      END AS visit_thru_dt
+	, CASE
+          WHEN bb_eob.src_type = '40'
+              THEN TO_CHAR(bb_eob.src_billable_period_start,'m-YYYY-MM')
+          ELSE
+              NULL
+      END AS visit_from_month_cd 
+	, CASE
+          WHEN bb_eob.src_type = '40'
+              THEN TO_CHAR(bb_eob.src_billable_period_end,'m-YYYY-MM')
+          ELSE
+              NULL
+      END AS visit_thru_month_cd
+	, bb_eob.src_patient_reference AS fk_patient_id      
+	, COALESCE('ccn_num'||'|'||'012345', '#NA') AS fk_facility_id  
+	, '012345' AS facility_ccn_num	
+	, '0123456789' AS facility_npi_num	
+	, '7' AS facility_type_cd	
+	, '1' AS facility_classification_cd	
+	, '#NA' AS facility_place_of_service_cd
+    , '#NA' AS fk_facility_rev_ctr_id
+    , '#NA' AS facility_revenue_center_cd
+    , '#NA' AS fk_tin_id
+    , '#NA' AS fk_tin_rendering_id	
+	
+	
+	, 'icd_10_pcs_cd'||'|'||bb_eob_procedure.src_procedure_code AS fk_procedure_id
+	, '#NA' AS procedure_betos_cd
+    , '#NA' AS procedure_hcpcs_cd
+    , TO_ARRAY('#NA') AS procedure_hcpcs_mod_cd_list
+	, '#NA' AS procedure_icd_9_cd
+	, bb_eob_procedure.src_procedure_code AS procedure_icd_10_cd
+FROM DEV_HUMANA.ods.bb_eob
+JOIN dev_humana.ods.BB_EOB_PROCEDURE 
+	ON bb_eob.pk_eob_id = bb_eob_procedure.fk_eob_id	
+WHERE bb_eob.RECORD_STATUS_CD = 'a'
+	AND bb_eob_procedure.record_status_cd = 'a'
+	--AND load_period = 'm-2021-03'
+	AND SUBSTRING(bb_eob.LOAD_PERIOD, 3,7) = '2021-03'
+	AND bb_eob.src_type IN ('10'  --HHA
+							, '20' --SNF
+							, '30' --SNF
+							,'40' --Outpatient
+							,'50' --Hospice
+							,'60' --Inpatient
+							,'61' --Inpatient
+							) 	
+	--AND bb_eob_item.src_revenue IS null	
+	
 
 
 
