@@ -243,11 +243,9 @@ WHERE bb_eob.RECORD_STATUS_CD = 'a'
 							,'60' --Inpatient
 							,'61' --Inpatient
 							) 
-							
+													
 
-							
-
-	AND bb_eob_item.src_revenue IS NOT NULL  --there's no diff in # of rows retrieved
+	--AND bb_eob_item.src_revenue IS NOT NULL  --there's no diff in # of rows retrieved
 
 
 
@@ -329,7 +327,28 @@ select fk_eob_id
 FROM allProvdrData
 GROUP BY fk_eob_id
 )	
-	
+, primaryOnlyPrvdrNPILabel
+AS
+(
+select fk_eob_id
+	, array_agg('npi_num' || '|' || src_provider_npi) within group(order by src_sequence) as providerID
+	, array_agg(src_role) within group(order by src_sequence) as providerRole
+	, array_agg(src_qualification) within group(order by src_sequence) as providerSpclty		
+FROM allProvdrData
+WHERE array_contains(src_role::variant, array_construct('primary')) = TRUE   
+GROUP BY fk_eob_id
+)
+, allOtherPrvdrNPILabel
+AS
+(
+select fk_eob_id
+	, array_agg('npi_num' || '|' || src_provider_npi) within group(order by src_sequence) as providerID
+	, array_agg(src_role) within group(order by src_sequence) as providerRole
+	, array_agg(src_qualification) within group(order by src_sequence) as providerSpclty			
+FROM allProvdrData
+WHERE array_contains(src_role::variant, array_construct('supervisor','assist','other')) = TRUE   
+GROUP BY fk_eob_id
+)	
 SELECT '{{dag_run.conf.org_id}}' AS org_id    --'HUMANA'
 	, 'fac_proc'||'|'|| bb_eob_procedure.pk_eob_procedure_id AS pk_activity_id
 	, 'fac_proc' AS activity_type_cd
@@ -410,13 +429,32 @@ SELECT '{{dag_run.conf.org_id}}' AS org_id    --'HUMANA'
     , '#NA' AS fk_tin_rendering_id	
 	, allPrvdrNPILabel.providerID AS fk_provider_id_list
 	--, to_array('npi_num'||'|'||bb_eob_care_team.src_provider_npi) AS fk_provider_id_list2		
-
+	, coalesce(trim(primaryOnlyPrvdrNPILabel.providerID[0]), 'npiNum|#NA') AS fk_provider_primary_id 
+	, '#NA' AS fk_provider_operating_id 
+	, '#NA' AS fk_provider_attending_id
+	, coalesce(trim(allOtherPrvdrNPILabel.providerID[0]), 'npiNum|#NA') AS fk_provider_other_id 
+	, '#NA' AS fk_provider_rendering_id
+    , '#NA' AS provider_rendering_specialty_cd
+    , '#NA' AS provider_rendering_type_cd
+    , '#NA' AS fk_provider_pay_to_id
+    , '#NA' AS fk_provider_ordering_id
+    , '#NA' AS fk_provider_dispensing_id
+    , '#NA' AS provider_dispensing_id_type_cd
+    , '#NA' AS fk_provider_prescribing_id
+    , '#NA' AS provider_prescribing_id_type_cd   
+	, TO_ARRAY('#NA') AS fk_diagnosis_id_list
+    , TO_ARRAY('#NA') AS diagnosis_provider_detail_icd_9_cd_list
+    , TO_ARRAY('#NA') AS diagnosis_provider_detail_icd_10_cd_list    	
 	, 'icd_10_pcs_cd'||'|'||bb_eob_procedure.src_procedure_code AS fk_procedure_id
 	, '#NA' AS procedure_betos_cd
     , '#NA' AS procedure_hcpcs_cd
     , TO_ARRAY('#NA') AS procedure_hcpcs_mod_cd_list
 	, '#NA' AS procedure_icd_9_cd
 	, bb_eob_procedure.src_procedure_code AS procedure_icd_10_cd
+	, '#NA' AS service_op_type_cd	
+	, '#NA' AS service_cms_type_cd
+	, 0.0 AS service_units	
+	
 FROM DEV_HUMANA.ods.bb_eob
 JOIN dev_humana.ods.BB_EOB_PROCEDURE 
 	ON bb_eob.pk_eob_id = bb_eob_procedure.fk_eob_id
@@ -430,7 +468,11 @@ LEFT JOIN allPrvdrNPILabel
 --LEFT JOIN ods.BB_EOB_CARE_TEAM 
 --	ON bb_eob.pk_eob_id = bb_eob_care_team.fk_eob_id
 --	AND bb_eob_item.src_care_Team_Link_ID[0] = bb_eob_care_team.src_sequence
---	AND bb_eob_care_team.record_status_cd = 'a'	
+--	AND bb_eob_care_team.record_status_cd = 'a'
+LEFT JOIN primaryOnlyPrvdrNPILabel
+	ON bb_eob.pk_eob_id = primaryOnlyPrvdrNPILabel.fk_eob_id
+LEFT JOIN allOtherPrvdrNPILabel
+	ON bb_eob.pk_eob_id = allOtherPrvdrNPILabel.fk_eob_id	
 WHERE bb_eob.RECORD_STATUS_CD = 'a'
 	AND bb_eob_procedure.record_status_cd = 'a'
 	--AND load_period = 'm-2021-03'
@@ -633,7 +675,21 @@ SELECT 'phys' AS activity_type_cd
 	, COALESCE('hcpcs_cd'||'|'||bb_eob_item.src_service,'#NA') AS fk_procedure_id
 	, COALESCE(xref.target_1_value, '#NA') AS procedure_betos_cd
 	, COALESCE(bb_eob_item.src_service,'#NA') AS procedure_hcpcs_cd
+	, ARRAY_CONSTRUCT(
+            COALESCE(bb_eob_item.src_modifier[0].coding[0]['code'],'#NA')
+          , COALESCE(bb_eob_item.src_modifier[1].coding[0]['code'],'#NA')
+          , COALESCE(bb_eob_item.src_modifier[2].coding[0]['code'],'#NA')
+          , COALESCE(bb_eob_item.src_modifier[3].coding[0]['code'],'#NA')
+          , COALESCE(bb_eob_item.src_modifier[4].coding[0]['code'],'#NA')
+      ) AS procedure_hcpcs_mod_cd_list
+	, '#NA' AS procedure_icd_9_cd
+    , '#NA' AS procedure_icd_10_cd
+    , '#NA' AS service_op_type_cd
+	, bb_eob_item.src_category AS service_cms_type_cd
+	, 0.0 AS service_units	
 	
+    , bb_eob_item.src_category
+	, bb_eob_item.src_modifier
 	, bb_eob.pk_eob_id
 	, bb_eob.src_claim_reference
 	, bb_eob_item.src_serviced_date
@@ -800,6 +856,18 @@ SELECT 'dme' AS activity_type_cd
     , '#NA' AS provider_dispensing_id_type_cd
     , '#NA' AS fk_provider_prescribing_id
     , '#NA' AS provider_prescribing_id_type_cd	
+	, TO_ARRAY('#NA') AS fk_diagnosis_id_list
+    , TO_ARRAY('#NA') AS diagnosis_provider_detail_icd_9_cd_list
+    , TO_ARRAY('#NA') AS diagnosis_provider_detail_icd_10_cd_list
+	, '#NA' AS fk_procedure_id
+    , '#NA' AS procedure_betos_cd
+    , '#NA' AS procedure_hcpcs_cd
+	, TO_ARRAY('#NA') AS procedure_hcpcs_mod_cd_list
+    , '#NA' AS procedure_icd_9_cd
+    , '#NA' AS procedure_icd_10_cd
+    , '#NA' AS service_op_type_cd
+	, bb_eob_item.src_category AS service_cms_type_cd   
+	, 0.0 AS service_units
 	
 	, bb_eob_item.src_service
 	, bb_eob.SRC_PROVIDER_REFERENCE 
@@ -820,16 +888,34 @@ WHERE bb_eob.RECORD_STATUS_CD = 'a'
 	AND SUBSTRING(bb_eob.LOAD_PERIOD, 3,7) = '2021-03'
 	AND bb_eob.src_type in ('81'
 							,'82'
-	) 	
+	)
 
 	
 --med filtering
 --826,814
 
-USE WAREHOUSE dev_humana;
-USE DATABASE dev_humana;
-
-WITH allProvdrData
+WITH eobid --also done for phys
+AS 
+(
+SELECT fk_eob_id
+	, src_value
+	, SRC_SYSTEM 
+FROM ods.BB_EOB_IDENTIFIER 
+where RECORD_STATUS_CD = 'a'
+)
+, eobidPvt
+AS
+(
+SELECT *	
+FROM eobid
+	pivot(max(src_value) FOR src_system IN (
+	'https://bluebutton.cms.gov/resources/variables/pde_id'  --pde claims don't populate this?
+	, 'https://bluebutton.cms.gov/resources/identifier/claim-group'
+	, 'https://bluebutton.cms.gov/resources/variables/rx_srvc_rfrnc_num'
+	)
+	) AS p (fk_eob_id, pde_id, claim_group, rx_srvc_rfrnc_num)	
+)
+, allProvdrData
 AS 
 (
 SELECT fk_eob_id
@@ -894,6 +980,20 @@ FROM allProvdrData
 WHERE array_contains(src_role::variant, array_construct('supervisor','assist','other')) = TRUE   
 GROUP BY fk_eob_id
 )
+, bb_eob_info
+AS 
+(
+	SELECT fk_eob_id
+		, record_status_cd 
+		, src_sequence 
+		, src_category
+		, src_code 
+		, src_value_string
+	FROM ods.BB_EOB_INFORMATION 
+	WHERE record_status_cd = 'a'
+	ORDER BY FK_EOB_ID 
+		, SRC_SEQUENCE 
+)
 
 SELECT 'med' AS activity_type_cd
 	, src_type
@@ -948,7 +1048,27 @@ SELECT 'med' AS activity_type_cd
 	, '#NA' AS provider_dispensing_id_type_cd
 	, '#NA' AS fk_provider_prescribing_id
 	, '#NA' AS provider_prescribing_id_type_cd
-    
+ 	, TO_ARRAY('#NA') AS fk_diagnosis_id_list  
+ 	, TO_ARRAY('#NA') AS diagnosis_provider_detail_icd_9_cd_list
+	, TO_ARRAY('#NA') AS diagnosis_provider_detail_icd_10_cd_list 	
+	, '#NA' AS fk_procedure_id 	
+	, '#NA' AS procedure_betos_cd 	
+	, '#NA' AS procedure_hcpcs_cd 
+	, TO_ARRAY('#NA') AS procedure_hcpcs_mod_cd_list
+    , '#NA' AS procedure_icd_9_cd
+    , '#NA' AS procedure_icd_10_cd
+    , '#NA' AS service_op_type_cd
+    , '#NA' AS service_cms_type_cd
+    , 0.0 AS service_units
+	--'ndc_spl_cd'||'|'||COALESCE(c.src_clm_line_ndc_cd,'#NA')	
+	, 'ndc_spl_cd'||'|'||COALESCE(bb_eob_item.src_service,'#NA') AS fk_medication_id
+ 	, COALESCE(bb_eob_item.src_service,'#NA') AS medication_ndc_spl_cd
+ 	, '#NA' AS medication_hcpcs_cd	
+ 	, COALESCE(bb_eob_info.src_code,'#NA') AS medication_dispensing_status_cd
+	, COALESCE(bb_eob_info2.src_code,'#NA') AS medication_dispense_as_written_code
+	, COALESCE(eobidPvt.rx_srvc_rfrnc_num,'#NA') AS medication_dispense_ref_num	
+
+	, bb_eob_item.src_quantity
 	, bb_eob.pk_eob_id
 	, bb_eob_item.src_revenue --map to facility_revenue_center_cd 
 	, bb_eob_item.src_service
@@ -968,9 +1088,16 @@ LEFT JOIN primaryOnlyPrvdrNPILabel
 	ON bb_eob.pk_eob_id = primaryOnlyPrvdrNPILabel.fk_eob_id
 LEFT JOIN allPrvdrNPILabel
 	ON bb_eob.pk_eob_id = allPrvdrNPILabel.fk_eob_id
+LEFT JOIN bb_eob_info 
+	ON bb_eob.pk_eob_id = bb_eob_info.fk_eob_id
+		AND bb_eob_info.src_category = 'https://bluebutton.cms.gov/resources/variables/dspnsng_stus_cd'
+LEFT JOIN bb_eob_info AS bb_eob_info2
+	ON bb_eob.pk_eob_id = bb_eob_info2.fk_eob_id
+		AND bb_eob_info2.src_category = 'https://bluebutton.cms.gov/resources/variables/daw_prod_slctn_cd'
+LEFT JOIN eobidPvt
+	ON bb_eob.pk_eob_id = eobidPvt.fk_eob_id
 WHERE bb_eob.RECORD_STATUS_CD = 'a'
 	AND bb_eob_item.record_status_cd = 'a'
 	--AND load_period = 'm-2021-03'
 	AND SUBSTRING(bb_eob.LOAD_PERIOD, 3,7) = '2021-03'
 	AND bb_eob.src_type = 'PDE'
-
