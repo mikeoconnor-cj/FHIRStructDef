@@ -199,6 +199,46 @@ SELECT 'fac_rev' AS activity_type_cd
 	, '#NA' AS service_cms_type_cd
 	-- c.src_clm_line_srvc_unit_qty AS service_units
 	, bb_eob_item.src_quantity AS service_units
+	, CASE
+          WHEN SUBSTR(bb_eob_item.src_service, 1, 1) = 'J'
+              THEN 'hcpcs_cd'||'|'||bb_eob_item.src_service
+          ELSE
+              '#NA'
+      END AS fk_medication_id
+	, '#NA' AS medication_ndc_spl_cd      
+	, CASE
+          WHEN SUBSTR(bb_eob_item.src_service, 1, 1) = 'J'
+              THEN bb_eob_item.src_service
+          ELSE
+              '#NA'
+      END AS medication_hcpcs_cd
+	, '#NA' AS medication_dispensing_status_cd
+    , '#NA' AS medication_dispense_as_written_code
+    , '#NA' AS medication_dispense_ref_num
+    , 0 AS medication_dispense_fill_num
+    , 0.0 AS medication_units
+    , 0 AS medication_days_supply
+	, CASE
+          WHEN SUBSTR(bb_eob_item.src_service, 1, 1) = 'E'
+              THEN 'hcpcs_cd'||'|'||bb_eob_item.src_service
+          ELSE
+              '#NA'
+      END AS fk_dme_id
+	, CASE
+          WHEN SUBSTR(bb_eob_item.src_service, 1, 1) = 'E'
+              THEN 'hcpcs_cd'||'|'||bb_eob_item.src_service
+          ELSE
+              '#NA'
+      END AS dme_hcpcs_cd      
+	, CASE
+          WHEN SUBSTR(bb_eob_item.src_service, 1, 1) = 'E'
+              THEN 'hcpcs_cd'||'|'||bb_eob_item.src_service
+          ELSE
+              '#NA'
+      END AS dme_hcpcs_cd    
+	, bb_eob_item.pk_eob_item_id AS claim_pk      
+	--placeholder for ods_pt_a_clm_nk AS claim_nk 
+	, bb_eob.src_type AS claim_type_cd
 	
 	, bb_eob.eff_start_dt
 	, bb_eob.eff_end_dt
@@ -453,7 +493,21 @@ SELECT '{{dag_run.conf.org_id}}' AS org_id    --'HUMANA'
 	, bb_eob_procedure.src_procedure_code AS procedure_icd_10_cd
 	, '#NA' AS service_op_type_cd	
 	, '#NA' AS service_cms_type_cd
-	, 0.0 AS service_units	
+	, 0.0 AS service_units
+	, '#NA' AS fk_medication_id
+    , '#NA' AS medication_ndc_spl_cd
+    , '#NA' AS medication_hcpcs_cd
+    , '#NA' AS medication_dispensing_status_cd
+    , '#NA' AS medication_dispense_as_written_code
+    , '#NA' AS medication_dispense_ref_num
+    , 0 AS medication_dispense_fill_num
+    , 0.0 AS medication_units
+    , 0 AS medication_days_supply
+	, '#NA' AS fk_dme_id
+    , '#NA' AS dme_hcpcs_cd    
+	, bb_eob_procedure.pk_eob_procedure_id AS claim_pk
+	--placeholder for ods_pt_a_clm_nk AS claim_nk
+	, bb_eob.src_type AS claim_type_cd	
 	
 FROM DEV_HUMANA.ods.bb_eob
 JOIN dev_humana.ods.BB_EOB_PROCEDURE 
@@ -484,7 +538,7 @@ WHERE bb_eob.RECORD_STATUS_CD = 'a'
 							,'50' --Hospice
 							,'60' --Inpatient
 							,'61' --Inpatient
-							) 	
+							)  	
 	--AND bb_eob_item.src_revenue IS null	
 
 
@@ -607,7 +661,7 @@ AS
 SELECT 'phys' AS activity_type_cd
 	, src_type
 	, bb_eob.ORG_ID 
-	, 'phys'||'|'||bb_eob.pk_eob_id AS pk_activity_id
+	, 'phys'||'|'||bb_eob_item.pk_eob_item_id AS pk_activity_id
 	, 'phys' AS activity_type_cd
 --	, coalesce(bb_eob_item.src_serviced_period_start,bb_eob.src_billable_period_start)
 --			AS activity_from_dt
@@ -687,6 +741,41 @@ SELECT 'phys' AS activity_type_cd
     , '#NA' AS service_op_type_cd
 	, bb_eob_item.src_category AS service_cms_type_cd
 	, 0.0 AS service_units	
+	, CASE
+          WHEN SUBSTR(bb_eob_item.src_service, 1, 1) = 'J'
+              THEN 'hcpcs_cd'||'|'||bb_eob_item.src_service
+          ELSE
+              '#NA'
+      END AS fk_medication_id
+	, '#NA' AS medication_ndc_spl_cd	
+	, CASE
+          WHEN SUBSTR(bb_eob_item.src_service, 1, 1) = 'J'
+              THEN bb_eob_item.src_service
+          ELSE
+              '#NA'
+      END AS medication_hcpcs_cd
+	, '#NA' AS medication_dispensing_status_cd
+    , '#NA' AS medication_dispense_as_written_code
+    , '#NA' AS medication_dispense_ref_num
+    , 0 AS medication_dispense_fill_num
+    , 0.0 AS medication_units
+    , 0 AS medication_days_supply
+	, CASE
+          WHEN SUBSTR(bb_eob_item.src_service, 1, 1) = 'E'
+              THEN 'hcpcs_cd'||'|'||bb_eob_item.src_service
+          ELSE
+              '#NA'
+      END AS fk_dme_id
+ 	, CASE
+          WHEN SUBSTR(bb_eob_item.src_service, 1, 1) = 'E'
+              THEN 'hcpcs_cd'||'|'||bb_eob_item.src_service
+          ELSE
+              '#NA'
+      END AS dme_hcpcs_cd
+	, bb_eob_item.pk_eob_item_id AS claim_pk
+	--placeholder for c.ods_pt_b_clm_nk AS claim_nk
+	, bb_eob.src_type AS claim_type_cd
+
 	
     , bb_eob_item.src_category
 	, bb_eob_item.src_modifier
@@ -802,7 +891,7 @@ GROUP BY fk_eob_id
 SELECT 'dme' AS activity_type_cd
 	, src_type
 	, bb_eob.ORG_ID 
-	, 'dme'||'|'||bb_eob.pk_eob_id AS pk_activity_id
+	, 'dme'||'|'||bb_eob_item.pk_eob_item_id AS pk_activity_id
 	, 'dme' AS activity_type_cd
 --	, coalesce(bb_eob_item.src_serviced_period_start,bb_eob.src_billable_period_start)
 --			AS activity_from_dt
@@ -868,6 +957,20 @@ SELECT 'dme' AS activity_type_cd
     , '#NA' AS service_op_type_cd
 	, bb_eob_item.src_category AS service_cms_type_cd   
 	, 0.0 AS service_units
+ 	, '#NA' AS fk_medication_id
+    , '#NA' AS medication_ndc_spl_cd
+    , '#NA' AS medication_hcpcs_cd
+    , '#NA' AS medication_dispensing_status_cd
+    , '#NA' AS medication_dispense_as_written_code
+    , '#NA' AS medication_dispense_ref_num
+    , 0 AS medication_dispense_fill_num
+    , 0.0 AS medication_units
+    , 0 AS medication_days_supply
+	, 'hcpcs_cd'||'|'||bb_eob_item.src_service AS fk_dme_id
+    , bb_eob_item.src_service AS dme_hcpcs_cd	
+	, bb_eob_item.pk_eob_item_id AS claim_pk
+	--placeholder for ods_pt_b_clm_nk AS claim_nk
+	, bb_eob.src_type AS claim_type_cd
 	
 	, bb_eob_item.src_service
 	, bb_eob.SRC_PROVIDER_REFERENCE 
@@ -888,7 +991,7 @@ WHERE bb_eob.RECORD_STATUS_CD = 'a'
 	AND SUBSTRING(bb_eob.LOAD_PERIOD, 3,7) = '2021-03'
 	AND bb_eob.src_type in ('81'
 							,'82'
-	)
+	) 	
 
 	
 --med filtering
@@ -995,9 +1098,11 @@ AS
 		, SRC_SEQUENCE 
 )
 
-SELECT 'med' AS activity_type_cd
-	, src_type
-	, bb_eob.ORG_ID 
+SELECT '{{dag_run.conf.org_id}}' AS org_id
+	, 'med'||'|'||bb_eob_item.pk_eob_item_id AS pk_activity_id
+	, 'med' AS activity_type_cd
+	--, src_type
+	--, bb_eob.ORG_ID 
 	--, bb_eob.src_billable_period_start AS activity_from_date
 	, bb_eob_item.src_serviced_date AS activity_from_date
 	--, bb_eob.src_billable_period_end AS activity_thru_date	
@@ -1067,7 +1172,16 @@ SELECT 'med' AS activity_type_cd
  	, COALESCE(bb_eob_info.src_code,'#NA') AS medication_dispensing_status_cd
 	, COALESCE(bb_eob_info2.src_code,'#NA') AS medication_dispense_as_written_code
 	, COALESCE(eobidPvt.rx_srvc_rfrnc_num,'#NA') AS medication_dispense_ref_num	
-
+ 	, CAST('1' AS smallint) AS medication_dispense_fill_num	
+	, bb_eob_item.src_quantity AS medication_units
+	, 1 AS medication_days_supply
+	, '#NA' AS fk_dme_id
+    , '#NA' AS dme_hcpcs_cd	
+	, bb_eob_item.pk_eob_item_id AS claim_pk
+	--placeholder as AS claim_nk
+	, bb_eob.src_type AS claim_type_cd
+	
+	, bb_eob_item.src_factor
 	, bb_eob_item.src_quantity
 	, bb_eob.pk_eob_id
 	, bb_eob_item.src_revenue --map to facility_revenue_center_cd 
