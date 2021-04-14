@@ -70,7 +70,41 @@ FROM allProvdrData
 WHERE array_contains(src_role::variant, array_construct('supervisor','assist','other')) = TRUE   
 GROUP BY fk_eob_id
 )
-
+, bb_eob_info
+AS 
+(
+	SELECT fk_eob_id
+		, record_status_cd 
+		, src_sequence 
+		, src_category
+		, src_code 
+		, CASE 
+			WHEN SRC_CATEGORY LIKE '%clm_freq_cd' AND SRC_CODE = '8' --8:Void/cancel prior claim
+						THEN '1'
+			ELSE '0'
+		  END AS src_clm_adjsmt_type_cd	
+		, src_value_string
+	FROM ods.BB_EOB_INFORMATION 
+	WHERE record_status_cd = 'a' 
+		--AND SRC_CATEGORY LIKE '%clm_freq_cd'
+	ORDER BY FK_EOB_ID 
+		, SRC_SEQUENCE 
+)
+, bb_eob_item_adj
+AS 
+(
+SELECT  FK_EOB_ITEM_ID 
+		, FK_EOB_ID 
+		, src_eob_item_sequence 
+		, src_category
+		, SRC_VALUE 
+		, SRC_AMOUNT 
+FROM ods.BB_EOB_ITEM_ADJUDICATION 
+WHERE record_status_cd = 'a'
+		--AND SRC_CATEGORY LIKE '%rev_cntr_tot_chrg_amt'
+ORDER BY FK_EOB_ITEM_ID 
+	, src_eob_item_sequence  
+)
 SELECT 'fac_rev' AS activity_type_cd
 	, 'fac_rev'||'|'|| bb_eob_item.pk_eob_item_id AS pk_activity_id
 	, bb_eob.src_billable_period_start AS activity_from_date
@@ -238,7 +272,27 @@ SELECT 'fac_rev' AS activity_type_cd
       END AS dme_hcpcs_cd    
 	, bb_eob_item.pk_eob_item_id AS claim_pk      
 	--placeholder for ods_pt_a_clm_nk AS claim_nk 
+	, COALESCE(TO_VARCHAR(bb_eob.src_provider_reference),'') || '|' ||
+      COALESCE(TO_VARCHAR(bb_eob.src_billable_period_start),'') || '|' ||
+      COALESCE(TO_VARCHAR(bb_eob.src_billable_period_end),'') || '|' ||
+      COALESCE(TO_VARCHAR(bb_eob.src_patient_reference),'')
+      AS ODS_PT_A_CLM_NK	
 	, bb_eob.src_type AS claim_type_cd
+	, 0.0 AS claim_line_allowed_amt
+	, (CASE
+          WHEN bb_eob_info.src_clm_adjsmt_type_cd = '1'
+              THEN -1
+          ELSE
+              1
+      END * bb_eob_item_adj.src_amount) AS claim_line_paid_amt	
+	, 0.0 AS claim_line_bene_paid_amt
+
+    , bb_eob.pk_eob_id
+	, bb_eob.src_patient_reference
+	, bb_eob.src_provider_reference
+	, bb_eob.src_billable_period_start
+	, bb_eob.src_billable_period_end
+	, bb_eob.SRC_FACILITY_REFERENCE 
 	
 	, bb_eob.eff_start_dt
 	, bb_eob.eff_end_dt
@@ -249,10 +303,9 @@ SELECT 'fac_rev' AS activity_type_cd
 	, bb_eob_item.src_revenue --map to facility_revenue_center_cd 
 	, bb_eob_item.src_service
 	, bb_eob.SRC_PROVIDER_REFERENCE 
-	, bb_eob.SRC_FACILITY_REFERENCE 
+
 	, bb_eob.SRC_ORGANIZATION_REFERENCE 
-	, bb_eob_item.src_location_reference
-	, bb_eob.src_patient_reference
+	, bb_eob_item.src_location_reference	
 FROM DEV_HUMANA.ods.bb_eob
 JOIN dev_humana.ods.bb_eob_item
 	ON bb_eob.pk_eob_id = bb_eob_item.fk_eob_id
@@ -270,7 +323,13 @@ LEFT JOIN allOtherPrvdrNPILabel
 	ON bb_eob.pk_eob_id = allOtherPrvdrNPILabel.fk_eob_id
 LEFT JOIN dev_common.ref.code_xref_map xref
     ON bb_eob_item.src_service = xref.source_1_value
-        AND xref.xref_id = 'hcpcs_x_betos'	
+        AND xref.xref_id = 'hcpcs_x_betos'
+LEFT JOIN bb_eob_info
+	ON bb_eob.pk_eob_id = bb_eob_info.fk_eob_id
+		AND bb_eob_info.SRC_CATEGORY LIKE '%clm_freq_cd'
+LEFT JOIN bb_eob_item_adj
+	ON bb_eob_item.pk_eob_item_id = bb_eob_item_adj.fk_eob_item_id
+		AND bb_eob_item_adj.SRC_CATEGORY LIKE '%rev_cntr_tot_chrg_amt'
 WHERE bb_eob.RECORD_STATUS_CD = 'a'
 	AND bb_eob_item.record_status_cd = 'a'
 	--AND load_period = 'm-2021-03'
@@ -507,7 +566,16 @@ SELECT '{{dag_run.conf.org_id}}' AS org_id    --'HUMANA'
     , '#NA' AS dme_hcpcs_cd    
 	, bb_eob_procedure.pk_eob_procedure_id AS claim_pk
 	--placeholder for ods_pt_a_clm_nk AS claim_nk
-	, bb_eob.src_type AS claim_type_cd	
+	, COALESCE(TO_VARCHAR(bb_eob.src_provider_reference),'') || '|' ||
+      COALESCE(TO_VARCHAR(bb_eob.src_billable_period_start),'') || '|' ||
+      COALESCE(TO_VARCHAR(bb_eob.src_billable_period_end),'') || '|' ||
+      COALESCE(TO_VARCHAR(bb_eob.src_patient_reference),'')
+      AS ODS_PT_A_CLM_NK		
+	, bb_eob.src_type AS claim_type_cd
+	, 0.0 AS claim_line_allowed_amt
+    , 0.0 AS claim_line_paid_amt
+    , 0.0 AS claim_line_bene_paid_amt	
+	
 	
 FROM DEV_HUMANA.ods.bb_eob
 JOIN dev_humana.ods.BB_EOB_PROCEDURE 
@@ -538,7 +606,7 @@ WHERE bb_eob.RECORD_STATUS_CD = 'a'
 							,'50' --Hospice
 							,'60' --Inpatient
 							,'61' --Inpatient
-							)  	
+							) 	
 	--AND bb_eob_item.src_revenue IS null	
 
 
@@ -657,7 +725,42 @@ AS
 	FROM eobDiagnosis 
 	GROUP BY fk_eob_id
 )
-
+, bb_eob_info
+AS 
+(
+	SELECT fk_eob_id
+		, record_status_cd 
+		, src_sequence 
+		, src_category
+		, src_code 
+		, CASE 
+			WHEN SRC_CATEGORY LIKE '%clm_freq_cd' AND SRC_CODE = '8' --8:Void/cancel prior claim
+						THEN '1'
+			ELSE '0'
+		  END AS src_clm_adjsmt_type_cd	
+		, src_value_string
+	FROM ods.BB_EOB_INFORMATION 
+	WHERE record_status_cd = 'a' 
+		--AND SRC_CATEGORY LIKE '%clm_freq_cd'
+	ORDER BY FK_EOB_ID 
+		, SRC_SEQUENCE 
+)
+, bb_eob_item_adj
+AS 
+(
+SELECT  FK_EOB_ITEM_ID 
+		, FK_EOB_ID 
+		, src_eob_item_sequence 
+		, src_category
+		, SRC_VALUE 
+		, SRC_AMOUNT 
+FROM ods.BB_EOB_ITEM_ADJUDICATION 
+WHERE record_status_cd = 'a'
+	--AND src_category LIKE '%ine_nch_pmt_amt'
+	--AND SRC_CATEGORY LIKE '%line_alowd_chrg_amt'
+ORDER BY FK_EOB_ITEM_ID 
+	, src_eob_item_sequence  
+)
 SELECT 'phys' AS activity_type_cd
 	, src_type
 	, bb_eob.ORG_ID 
@@ -774,9 +877,24 @@ SELECT 'phys' AS activity_type_cd
       END AS dme_hcpcs_cd
 	, bb_eob_item.pk_eob_item_id AS claim_pk
 	--placeholder for c.ods_pt_b_clm_nk AS claim_nk
+	, COALESCE(TO_VARCHAR(eobidPvt.clm_id),'') || '|' ||
+      COALESCE(TO_VARCHAR(bb_eob.src_patient_reference),'')
+      AS ODS_PT_B_CLM_NK		
 	, bb_eob.src_type AS claim_type_cd
-
-	
+	, (CASE
+          WHEN bb_eob_info.src_clm_adjsmt_type_cd = '1'
+              THEN -1
+          ELSE
+              1
+      END * bb_eob_item_adj.src_amount) AS claim_line_allowed_amt 
+	, (CASE
+          WHEN bb_eob_info.src_clm_adjsmt_type_cd = '1'
+              THEN -1
+          ELSE
+              1
+      END * bb_eob_item_adj2.src_amount) AS claim_line_paid_amt 
+    , 0.0 AS claim_line_bene_paid_amt
+    
     , bb_eob_item.src_category
 	, bb_eob_item.src_modifier
 	, bb_eob.pk_eob_id
@@ -811,7 +929,16 @@ LEFT JOIN allEOBDxCodeAgg
 	ON bb_eob.pk_eob_id = allEOBDxCodeAgg.fk_eob_id
 LEFT JOIN dev_common.ref.code_xref_map xref
     ON bb_eob_item.src_service = xref.source_1_value
-        AND xref.xref_id = 'hcpcs_x_betos'		
+        AND xref.xref_id = 'hcpcs_x_betos'
+LEFT JOIN bb_eob_info
+	ON bb_eob.pk_eob_id = bb_eob_info.fk_eob_id
+		AND bb_eob_info.SRC_CATEGORY LIKE '%clm_freq_cd'
+LEFT JOIN bb_eob_item_adj
+	ON bb_eob_item.pk_eob_item_id = bb_eob_item_adj.fk_eob_item_id
+	AND bb_eob_item_adj.SRC_CATEGORY LIKE '%line_alowd_chrg_amt'
+LEFT JOIN bb_eob_item_adj bb_eob_item_adj2
+	ON bb_eob_item.pk_eob_item_id = bb_eob_item_adj2.fk_eob_item_id
+	AND bb_eob_item_adj2.SRC_CATEGORY LIKE '%ine_nch_pmt_amt'	
 WHERE bb_eob.RECORD_STATUS_CD = 'a'
 	AND bb_eob_item.record_status_cd = 'a'
 	--AND load_period = 'm-2021-03'
@@ -823,7 +950,27 @@ WHERE bb_eob.RECORD_STATUS_CD = 'a'
 --dme filtering
 	--I don't see any dme data, sql below doesn't pull records but there're no errors
 		
-WITH allProvdrData
+WITH eobid 
+AS 
+(
+SELECT fk_eob_id
+	, src_value
+	, SRC_SYSTEM 
+FROM ods.BB_EOB_IDENTIFIER 
+where RECORD_STATUS_CD = 'a'
+)
+, eobidPvt
+AS
+(
+SELECT *	
+FROM eobid
+	pivot(max(src_value) FOR src_system IN (
+	'https://bluebutton.cms.gov/resources/variables/clm_id'  --pde claims don't populate this?
+	, 'https://bluebutton.cms.gov/resources/identifier/claim-group'
+	)
+	) AS p (fk_eob_id, clm_id, claim_group)	
+)
+, allProvdrData
 AS 
 (
 SELECT fk_eob_id
@@ -887,7 +1034,43 @@ select fk_eob_id
 FROM allProvdrData
 WHERE array_contains(src_role::variant, array_construct('supervisor','assist','other')) = TRUE   
 GROUP BY fk_eob_id
-)	
+)
+, bb_eob_info
+AS 
+(
+	SELECT fk_eob_id
+		, record_status_cd 
+		, src_sequence 
+		, src_category
+		, src_code 
+		, CASE 
+			WHEN SRC_CATEGORY LIKE '%clm_freq_cd' AND SRC_CODE = '8' --8:Void/cancel prior claim
+						THEN '1'
+			ELSE '0'
+		  END AS src_clm_adjsmt_type_cd	
+		, src_value_string
+	FROM ods.BB_EOB_INFORMATION 
+	WHERE record_status_cd = 'a' 
+		--AND SRC_CATEGORY LIKE '%clm_freq_cd'
+	ORDER BY FK_EOB_ID 
+		, SRC_SEQUENCE 
+)
+, bb_eob_item_adj
+AS 
+(
+SELECT  FK_EOB_ITEM_ID 
+		, FK_EOB_ID 
+		, src_eob_item_sequence 
+		, src_category
+		, SRC_VALUE 
+		, SRC_AMOUNT 
+FROM ods.BB_EOB_ITEM_ADJUDICATION 
+WHERE record_status_cd = 'a'
+	--AND src_category LIKE '%ine_nch_pmt_amt'
+	--AND SRC_CATEGORY LIKE '%line_alowd_chrg_amt'
+ORDER BY FK_EOB_ITEM_ID 
+	, src_eob_item_sequence  
+)
 SELECT 'dme' AS activity_type_cd
 	, src_type
 	, bb_eob.ORG_ID 
@@ -970,8 +1153,18 @@ SELECT 'dme' AS activity_type_cd
     , bb_eob_item.src_service AS dme_hcpcs_cd	
 	, bb_eob_item.pk_eob_item_id AS claim_pk
 	--placeholder for ods_pt_b_clm_nk AS claim_nk
+	, COALESCE(TO_VARCHAR(eobidPvt.clm_id),'') || '|' ||
+      COALESCE(TO_VARCHAR(bb_eob.src_patient_reference),'')
+      AS ODS_PT_B_CLM_NK		
 	, bb_eob.src_type AS claim_type_cd
-	
+	, 0.0 AS claim_line_allowed_amt
+	, (CASE
+          WHEN bb_eob_info.src_clm_adjsmt_type_cd = '1'
+              THEN -1
+          ELSE
+              1
+      END * bb_eob_item_adj.src_amount) AS claim_line_paid_amt 
+    , 0.0 AS claim_line_bene_paid_amt	
 	, bb_eob_item.src_service
 	, bb_eob.SRC_PROVIDER_REFERENCE 
 	, bb_eob.SRC_FACILITY_REFERENCE 
@@ -985,6 +1178,14 @@ LEFT JOIN allPrvdrNPILabel
 	ON bb_eob.pk_eob_id = allPrvdrNPILabel.fk_eob_id
 LEFT JOIN primaryOnlyPrvdrNPILabel
 	ON bb_eob.pk_eob_id = primaryOnlyPrvdrNPILabel.fk_eob_id
+LEFT JOIN eobidPvt
+	ON bb_eob.pk_eob_id = eobidPvt.fk_eob_id
+LEFT JOIN bb_eob_info
+	ON bb_eob.pk_eob_id = bb_eob_info.fk_eob_id
+		AND bb_eob_info.SRC_CATEGORY LIKE '%clm_freq_cd'
+LEFT JOIN bb_eob_item_adj 
+	ON bb_eob_item.pk_eob_item_id = bb_eob_item_adj.fk_eob_item_id
+	AND bb_eob_item_adj.SRC_CATEGORY LIKE '%ine_nch_pmt_amt'			
 WHERE bb_eob.RECORD_STATUS_CD = 'a'
 	AND bb_eob_item.record_status_cd = 'a'
 	--AND load_period = 'm-2021-03'
@@ -1091,13 +1292,34 @@ AS
 		, src_sequence 
 		, src_category
 		, src_code 
+		, CASE 
+			WHEN SRC_CATEGORY LIKE '%clm_freq_cd' AND SRC_CODE = '8' --8:Void/cancel prior claim
+						THEN '1'
+			ELSE '0'
+		  END AS src_clm_adjsmt_type_cd	
 		, src_value_string
 	FROM ods.BB_EOB_INFORMATION 
 	WHERE record_status_cd = 'a'
 	ORDER BY FK_EOB_ID 
 		, SRC_SEQUENCE 
 )
-
+, bb_eob_item_adj
+AS 
+(
+SELECT  FK_EOB_ITEM_ID 
+		, FK_EOB_ID 
+		, src_eob_item_sequence 
+		, src_category
+		, SRC_VALUE 
+		, SRC_AMOUNT 
+FROM ods.BB_EOB_ITEM_ADJUDICATION 
+WHERE record_status_cd = 'a'
+	--AND src_category LIKE '%ptnt_pay_amt'
+	--AND src_category LIKE '%ine_nch_pmt_amt'
+	--AND SRC_CATEGORY LIKE '%line_alowd_chrg_amt'
+ORDER BY FK_EOB_ITEM_ID 
+	, src_eob_item_sequence  
+)
 SELECT '{{dag_run.conf.org_id}}' AS org_id
 	, 'med'||'|'||bb_eob_item.pk_eob_item_id AS pk_activity_id
 	, 'med' AS activity_type_cd
@@ -1179,7 +1401,23 @@ SELECT '{{dag_run.conf.org_id}}' AS org_id
     , '#NA' AS dme_hcpcs_cd	
 	, bb_eob_item.pk_eob_item_id AS claim_pk
 	--placeholder as AS claim_nk
+	, COALESCE(TO_VARCHAR(bb_eob_item.src_serviced_date),'') || '|' ||
+      COALESCE(TO_VARCHAR('01'),'') || '|' ||  		--dummied as '01' until pull from facility.system 
+      COALESCE(TO_VARCHAR(bb_eob.src_facility_reference),'') || '|' || 	--facility field is improved in sandbox
+      COALESCE(TO_VARCHAR(bb_eob_info.src_code),'') || '|' ||
+      COALESCE(TO_VARCHAR(eobidPvt.rx_srvc_rfrnc_num),'') || '|' ||
+      COALESCE(TO_VARCHAR('02'),'')   --dummied as '2' until Eng pulls fill_num from JSON
+      AS ODS_PT_D_CLM_NK	
+	
 	, bb_eob.src_type AS claim_type_cd
+	, 0.0 AS claim_line_allowed_amt
+    , 0.0 AS claim_line_paid_amt	
+	, (CASE
+          WHEN bb_eob_info.src_clm_adjsmt_type_cd = '1'
+              THEN -1
+          ELSE
+              1
+      END * bb_eob_item_adj.src_amount) AS claim_line_bene_paid_amt 	
 	
 	, bb_eob_item.src_factor
 	, bb_eob_item.src_quantity
@@ -1208,6 +1446,12 @@ LEFT JOIN bb_eob_info
 LEFT JOIN bb_eob_info AS bb_eob_info2
 	ON bb_eob.pk_eob_id = bb_eob_info2.fk_eob_id
 		AND bb_eob_info2.src_category = 'https://bluebutton.cms.gov/resources/variables/daw_prod_slctn_cd'
+LEFT JOIN bb_eob_info AS bb_eob_info3
+	ON bb_eob.pk_eob_id = bb_eob_info3.fk_eob_id
+		AND bb_eob_info3.src_category LIKE	'%clm_freq_cd'
+LEFT JOIN bb_eob_item_adj 
+	ON bb_eob_item.pk_eob_item_id = bb_eob_item_adj.fk_eob_item_id
+	AND bb_eob_item_adj.SRC_CATEGORY LIKE '%ptnt_pay_amt'		
 LEFT JOIN eobidPvt
 	ON bb_eob.pk_eob_id = eobidPvt.fk_eob_id
 WHERE bb_eob.RECORD_STATUS_CD = 'a'
