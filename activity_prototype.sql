@@ -1,7 +1,6 @@
 USE WAREHOUSE dev_humana;
 USE DATABASE dev_humana;
 
-
 --fac_rev filtering
 --768,631
 
@@ -286,26 +285,12 @@ SELECT 'fac_rev' AS activity_type_cd
               1
       END * bb_eob_item_adj.src_amount) AS claim_line_paid_amt	
 	, 0.0 AS claim_line_bene_paid_amt
-
-    , bb_eob.pk_eob_id
-	, bb_eob.src_patient_reference
-	, bb_eob.src_provider_reference
-	, bb_eob.src_billable_period_start
-	, bb_eob.src_billable_period_end
-	, bb_eob.SRC_FACILITY_REFERENCE 
-	
-	, bb_eob.eff_start_dt
-	, bb_eob.eff_end_dt
-	, bb_eob.src_created
-	, src_type
-	, bb_eob.ORG_ID 
-	--, count(*) AS rwCnt
-	, bb_eob_item.src_revenue --map to facility_revenue_center_cd 
-	, bb_eob_item.src_service
-	, bb_eob.SRC_PROVIDER_REFERENCE 
-
-	, bb_eob.SRC_ORGANIZATION_REFERENCE 
-	, bb_eob_item.src_location_reference	
+	, '{{dag_run.conf.load_period}}' AS load_period
+	, 1234 AS load_run_id  --{{ti.job_id}}
+	, CURRENT_TIMESTAMP AS load_ts
+	, '#NA' AS claim_primary_payer_cd
+	, '#NA' AS rev_apc_hipps_cd
+		
 FROM DEV_HUMANA.ods.bb_eob
 JOIN dev_humana.ods.bb_eob_item
 	ON bb_eob.pk_eob_id = bb_eob_item.fk_eob_id
@@ -342,46 +327,9 @@ WHERE bb_eob.RECORD_STATUS_CD = 'a'
 							,'60' --Inpatient
 							,'61' --Inpatient
 							) 
-													
 
-	--AND bb_eob_item.src_revenue IS NOT NULL  --there's no diff in # of rows retrieved
-
-
-
+							
 --fac_proc filtering
-	--no records returning with this filter
-	--corrrect filtering likely relies on 
-	--data being populated in bb_eob_procedure, currently not populated
-
-SELECT 'fac_proc' AS activity_type_cd
-	, src_type
-	, bb_eob.ORG_ID 
-	--, count(*) AS rwCnt
-	, bb_eob_item.src_revenue --map to facility_revenue_center_cd 
-	, bb_eob_item.src_service
-	, bb_eob.SRC_PROVIDER_REFERENCE 
-	, bb_eob.SRC_FACILITY_REFERENCE 
-	, bb_eob.SRC_ORGANIZATION_REFERENCE 
-	, bb_eob_item.src_location_reference
-	, bb_eob.src_patient_reference
-FROM DEV_HUMANA.ods.bb_eob
-JOIN dev_humana.ods.bb_eob_item
-	ON bb_eob.pk_eob_id = bb_eob_item.fk_eob_id
-WHERE bb_eob.RECORD_STATUS_CD = 'a'
-	AND bb_eob_item.record_status_cd = 'a'
-	--AND load_period = 'm-2021-03'
-	AND SUBSTRING(bb_eob.LOAD_PERIOD, 3,7) = '2021-03'
-	AND bb_eob.src_type IN ('10'  --HHA
-							, '20' --SNF
-							, '30' --SNF
-							,'40' --Outpatient
-							,'50' --Hospice
-							,'60' --Inpatient
-							,'61' --Inpatient
-							) 
-	AND bb_eob_item.src_revenue IS null	
-
---alternative
 
 WITH allProvdrData
 AS 
@@ -575,7 +523,11 @@ SELECT '{{dag_run.conf.org_id}}' AS org_id    --'HUMANA'
 	, 0.0 AS claim_line_allowed_amt
     , 0.0 AS claim_line_paid_amt
     , 0.0 AS claim_line_bene_paid_amt	
-	
+	, '{{dag_run.conf.load_period}}' AS load_period
+	, 1234 AS load_run_id  --{{ti.job_id}}
+	, CURRENT_TIMESTAMP AS load_ts
+	, '#NA' AS claim_primary_payer_cd
+	, '#NA' AS rev_apc_hipps_cd	
 	
 FROM DEV_HUMANA.ods.bb_eob
 JOIN dev_humana.ods.BB_EOB_PROCEDURE 
@@ -608,10 +560,7 @@ WHERE bb_eob.RECORD_STATUS_CD = 'a'
 							,'61' --Inpatient
 							) 	
 	--AND bb_eob_item.src_revenue IS null	
-
-
-
-
+							
 --phys filtering
 --3,248,492
 	
@@ -894,26 +843,12 @@ SELECT 'phys' AS activity_type_cd
               1
       END * bb_eob_item_adj2.src_amount) AS claim_line_paid_amt 
     , 0.0 AS claim_line_bene_paid_amt
-    
-    , bb_eob_item.src_category
-	, bb_eob_item.src_modifier
-	, bb_eob.pk_eob_id
-	, bb_eob.src_claim_reference
-	, bb_eob_item.src_serviced_date
-	, bb_eob_item.src_serviced_period_start
-	, bb_eob_item.src_serviced_period_end
-	, bb_eob.src_billable_period_start
-	, bb_eob.src_billable_period_end
-	, bb_eob.src_created
-	--, count(*) AS rwCnt
-	, bb_eob_item.src_revenue --map to facility_revenue_center_cd 
-	, bb_eob_item.src_service
-	, bb_eob.SRC_PROVIDER_REFERENCE 
-	, bb_eob.SRC_FACILITY_REFERENCE 
-	, bb_eob.SRC_ORGANIZATION_REFERENCE 
-	, bb_eob_item.src_location_reference
-	, bb_eob_item.src_location_code  --it's 99 
-	, bb_eob.src_patient_reference
+    , '{{dag_run.conf.load_period}}' AS load_period
+	, 1234 AS load_run_id  --{{ti.job_id}}
+	, CURRENT_TIMESTAMP AS load_ts
+	, '#NA' AS claim_primary_payer_cd
+	, '#NA' AS rev_apc_hipps_cd
+
 FROM DEV_HUMANA.ods.bb_eob
 JOIN dev_humana.ods.bb_eob_item
 	ON bb_eob.pk_eob_id = bb_eob_item.fk_eob_id
@@ -944,12 +879,11 @@ WHERE bb_eob.RECORD_STATUS_CD = 'a'
 	--AND load_period = 'm-2021-03'
 	AND SUBSTRING(bb_eob.LOAD_PERIOD, 3,7) = '2021-03'
 	AND bb_eob.src_type IN ('71','72') 
-
-
+							
 
 --dme filtering
 	--I don't see any dme data, sql below doesn't pull records but there're no errors
-		
+
 WITH eobid 
 AS 
 (
@@ -1164,13 +1098,13 @@ SELECT 'dme' AS activity_type_cd
           ELSE
               1
       END * bb_eob_item_adj.src_amount) AS claim_line_paid_amt 
-    , 0.0 AS claim_line_bene_paid_amt	
-	, bb_eob_item.src_service
-	, bb_eob.SRC_PROVIDER_REFERENCE 
-	, bb_eob.SRC_FACILITY_REFERENCE 
-	, bb_eob.SRC_ORGANIZATION_REFERENCE 
-	, bb_eob_item.src_location_reference
-	, bb_eob.src_patient_reference
+    , 0.0 AS claim_line_bene_paid_amt
+	, '{{dag_run.conf.load_period}}' AS load_period
+	, 1234 AS load_run_id  --{{ti.job_id}}
+	, CURRENT_TIMESTAMP AS load_ts
+	, '#NA' AS claim_primary_payer_cd
+	, '#NA' AS rev_apc_hipps_cd    
+
 FROM DEV_HUMANA.ods.bb_eob
 JOIN DEV_HUMANA.ods.bb_eob_item
 	ON bb_eob.pk_eob_id = bb_eob_item.fk_eob_id
@@ -1194,9 +1128,12 @@ WHERE bb_eob.RECORD_STATUS_CD = 'a'
 							,'82'
 	) 	
 
-	
+
 --med filtering
 --826,814
+
+
+
 
 WITH eobid --also done for phys
 AS 
@@ -1418,17 +1355,12 @@ SELECT '{{dag_run.conf.org_id}}' AS org_id
           ELSE
               1
       END * bb_eob_item_adj.src_amount) AS claim_line_bene_paid_amt 	
-	
-	, bb_eob_item.src_factor
-	, bb_eob_item.src_quantity
-	, bb_eob.pk_eob_id
-	, bb_eob_item.src_revenue --map to facility_revenue_center_cd 
-	, bb_eob_item.src_service
-	, bb_eob.SRC_PROVIDER_REFERENCE 
-	, bb_eob.SRC_FACILITY_REFERENCE 
-	, bb_eob.SRC_ORGANIZATION_REFERENCE 
-	, bb_eob_item.src_location_reference
-	, bb_eob.src_patient_reference
+	, '{{dag_run.conf.load_period}}' AS load_period
+    , 1234 AS load_run_id  --{{ti.job_id}}
+    , CURRENT_TIMESTAMP AS load_ts
+    , null AS claim_primary_payer_cd
+    , '#NA' as rev_apc_hipps_cd
+
 FROM DEV_HUMANA.ods.bb_eob
 JOIN dev_humana.ods.bb_eob_item
 	ON bb_eob.pk_eob_id = bb_eob_item.fk_eob_id
@@ -1459,3 +1391,4 @@ WHERE bb_eob.RECORD_STATUS_CD = 'a'
 	--AND load_period = 'm-2021-03'
 	AND SUBSTRING(bb_eob.LOAD_PERIOD, 3,7) = '2021-03'
 	AND bb_eob.src_type = 'PDE'
+	
